@@ -1,6 +1,6 @@
 [project]
 name = "tehillim-benchmark"
-version = "0.5.0"
+version = "0.6.0"
 description = "Evaluates embedding models against Psalms parallelism and genre benchmarks."
 requires-python = ">=3.12"
 license = { text = "MIT" }
