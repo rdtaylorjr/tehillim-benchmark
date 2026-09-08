@@ -24,7 +24,7 @@ from library.embeddings import (
 from library.retrieval_metrics import paired_cosine_similarity, sparse_paired_cosine_similarity
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import DEFAULT_MAX_WORKERS, map_in_order
+from library.worker_pool import map_in_order
 from parallelism.evaluate import build_side_vectors, build_side_vectors_sparse
 from parallelism.pairs import RetrievalPair, build_retrieval_pairs, filter_pairs_with_vectors
 from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups
@@ -89,7 +89,7 @@ def compare_true_similarity(
     pairs: list[RetrievalPair],
     model_paths: list[Path],
     background_node_ids: list[int],
-    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_workers: int | None = None,
 ) -> list[dict[str, str | int | float]]:
     """Scores every model file across workers, rows sorted by calibrated effect size descending."""
     score = partial(score_model, pairs=pairs, background_node_ids=background_node_ids)

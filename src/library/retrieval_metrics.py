@@ -74,6 +74,8 @@ def sparse_cosine_similarity_matrix(a: sp.csr_matrix, b: sp.csr_matrix) -> np.nd
 
 def sparse_paired_cosine_similarity(a: sp.csr_matrix, b: sp.csr_matrix) -> np.ndarray:
     """Same semantics as paired_cosine_similarity, comparing sparse rows without densifying."""
+    #: Widened like every other cosine routine, so storing a model sparsely cannot change its score.
+    a, b = a.astype(np.float64, copy=False), b.astype(np.float64, copy=False)
     a_norm = np.sqrt(np.asarray(a.multiply(a).sum(axis=1))).ravel()
     b_norm = np.sqrt(np.asarray(b.multiply(b).sum(axis=1))).ravel()
     if np.any(a_norm == 0) or np.any(b_norm == 0):

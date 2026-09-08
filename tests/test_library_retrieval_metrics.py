@@ -14,6 +14,7 @@ from library.retrieval_metrics import (
     paired_discrimination_test,
     recall_at_k,
     sparse_cosine_similarity_matrix,
+    sparse_paired_cosine_similarity,
     stratified_mean_gap_test,
 )
 
@@ -429,3 +430,46 @@ def test_discrimination_reports_no_effect_when_every_difference_is_zero() -> Non
     assert result.p_value == 1.0
     assert result.statistic == 0.0
     assert result.rank_biserial == 0.0
+
+
+class TestEveryCosineRoutineAccumulatesAtTheSamePrecision:
+    """Embeddings are float32, so every routine must widen before accumulating, sparse included."""
+
+    @staticmethod
+    def _reference_paired(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """cos(a_i, b_i) from the definition, in float128, independent of the code under test."""
+        wide_a = a.astype(np.longdouble)
+        wide_b = b.astype(np.longdouble)
+        norms = np.sqrt((wide_a * wide_a).sum(axis=1)) * np.sqrt((wide_b * wide_b).sum(axis=1))
+        return ((wide_a * wide_b).sum(axis=1) / norms).astype(np.float64)
+
+    @staticmethod
+    def _vectors() -> tuple[np.ndarray, np.ndarray]:
+        rng = np.random.default_rng(0)
+        a = rng.normal(size=(40, 64)).astype(np.float32)
+        b = rng.normal(size=(40, 64)).astype(np.float32)
+        return a, b
+
+    def test_the_dense_paired_routine_matches_a_float128_reference(self) -> None:
+        a, b = self._vectors()
+
+        produced = paired_cosine_similarity(a, b)
+
+        assert np.max(np.abs(produced - self._reference_paired(a, b))) < 1e-15
+
+    def test_the_sparse_paired_routine_matches_a_float128_reference(self) -> None:
+        """It read float32 rows without widening: a float32 answer beside a float64 one."""
+        a, b = self._vectors()
+
+        produced = sparse_paired_cosine_similarity(sp.csr_matrix(a), sp.csr_matrix(b))
+
+        assert np.max(np.abs(produced - self._reference_paired(a, b))) < 1e-15
+
+    def test_the_two_paired_routines_agree_with_each_other(self) -> None:
+        """One statistic, so storing a model sparsely must not change the number it reports."""
+        a, b = self._vectors()
+
+        dense = paired_cosine_similarity(a, b)
+        sparse = sparse_paired_cosine_similarity(sp.csr_matrix(a), sp.csr_matrix(b))
+
+        assert np.max(np.abs(dense - sparse)) < 1e-15

@@ -7,6 +7,7 @@ import pandas as pd
 
 from library.master_report import finalise_long_metrics, melt_to_long, pivot_metrics_wide
 from library.rows_output import write_dataframe_parquet
+from library.tie_diagnostics import tie_fractions_by_model
 
 _RETRIEVAL_OVERALL_METRICS = [
     "n_pairs",
@@ -68,7 +69,10 @@ def _melt_wide_by_type(scored_df: pd.DataFrame, metrics: list[str], source: str)
 
 
 def build_long_metrics(
-    retrieval_df: pd.DataFrame, calibration_df: pd.DataFrame, scope_baseline_df: pd.DataFrame
+    retrieval_df: pd.DataFrame,
+    calibration_df: pd.DataFrame,
+    scope_baseline_df: pd.DataFrame,
+    pair_detail_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Combines all three metric sources into one tidy (model, scope, metric, value) table."""
     parts = [
@@ -97,6 +101,10 @@ def build_long_metrics(
     baseline_long["source"] = "vs_baseline"
     parts.append(baseline_long)
 
+    if pair_detail_df is not None:
+        #: Reports where a separation AUC is decided by one tie block rather than by ordering.
+        parts.append(tie_fractions_by_model(pair_detail_df))
+
     return finalise_long_metrics(parts)
 
 
@@ -113,8 +121,11 @@ def main(argv: list[str] | None = None) -> None:
     retrieval_df = pd.read_csv(args.retrieval_csv)
     calibration_df = pd.read_csv(args.calibration_csv)
     scope_baseline_df = pd.read_parquet(args.detail_dir / "type_vs_baseline.parquet")
+    pair_detail_df = pd.read_parquet(
+        args.detail_dir / "pair_detail.parquet", columns=["model", "raw_similarity"]
+    )
 
-    long_df = build_long_metrics(retrieval_df, calibration_df, scope_baseline_df)
+    long_df = build_long_metrics(retrieval_df, calibration_df, scope_baseline_df, pair_detail_df)
     write_dataframe_parquet(args.output_dir / "model_metrics_long.parquet", long_df)
 
     overall_wide = _pivot_scope(long_df, "overall", ["model", "model_base", "text_variant"])
@@ -128,10 +139,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"model_metrics_by_type: {len(by_type_wide)} rows")
 
 
-if __name__ == "__main__":
-    main()
-
-
 def _pivot_scope(long_df: pd.DataFrame, scope_kind: str, index_cols: list[str]) -> pd.DataFrame:
     """Pivots one scope_kind's rows, the overall and per-type tables being separate."""
     return pivot_metrics_wide(long_df[long_df["scope_kind"] == scope_kind], index_cols)
+
+
+if __name__ == "__main__":
+    main()

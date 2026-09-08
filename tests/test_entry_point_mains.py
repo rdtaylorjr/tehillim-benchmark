@@ -361,6 +361,18 @@ class TestGenreBuildMasterReport:
             ],
             api_factory=api,
         )
+        detail_dir = tmp_path / "detail"
+        genre_export_detail.main(
+            [
+                str(genre_csv),
+                str(embeddings_dir),
+                "--output-dir",
+                str(detail_dir),
+                "--workers",
+                "1",
+            ],
+            api_factory=api,
+        )
         output_dir = tmp_path / "report"
 
         genre_build_master_report.main(
@@ -369,6 +381,8 @@ class TestGenreBuildMasterReport:
                 str(summary),
                 "--bootstrap-csv",
                 str(bootstrap),
+                "--detail-dir",
+                str(detail_dir),
                 "--output-dir",
                 str(output_dir),
             ]
@@ -660,12 +674,26 @@ class TestUiExportPipeline:
             ],
             api_factory=genre_api,
         )
+        genre_detail_dir = genre_dir / "stage=detail"
+        genre_export_detail.main(
+            [
+                str(genre_csv),
+                str(embeddings_dir),
+                "--output-dir",
+                str(genre_detail_dir),
+                "--workers",
+                "1",
+            ],
+            api_factory=genre_api,
+        )
         genre_build_master_report.main(
             [
                 "--summary-csv",
                 str(summary),
                 "--bootstrap-csv",
                 str(bootstrap),
+                "--detail-dir",
+                str(genre_detail_dir),
                 "--output-dir",
                 str(genre_dir / "stage=master"),
             ]

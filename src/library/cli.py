@@ -14,7 +14,7 @@ from library.protocol import (
     DEFAULT_N_PERMUTATIONS,
     DEFAULT_N_RESAMPLES,
 )
-from library.worker_pool import DEFAULT_MAX_WORKERS
+from library.worker_pool import default_max_workers
 
 
 def add_genre_csv_argument(parser: argparse.ArgumentParser) -> None:
@@ -42,7 +42,7 @@ def add_scoring_arguments(
 ) -> None:
     """Adds the options every batch script takes, so a changed default lands in one place."""
     parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
-    parser.add_argument("--workers", type=int, default=DEFAULT_MAX_WORKERS)
+    parser.add_argument("--workers", type=int, default=default_max_workers())
     parser.add_argument("--output", type=Path, default=None)
     if with_seed:
         parser.add_argument("--seed", type=int, default=0)

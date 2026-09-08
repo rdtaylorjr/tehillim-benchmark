@@ -7,6 +7,7 @@ import pandas as pd
 
 from library.master_report import finalise_long_metrics, melt_to_long, pivot_metrics_wide
 from library.rows_output import write_dataframe_parquet
+from library.tie_diagnostics import tie_fractions_by_model
 
 _SUMMARY_METRICS = [
     "n_same_genre",
@@ -40,12 +41,19 @@ _BOOTSTRAP_METRICS = [
 ]
 
 
-def build_long_metrics(summary_df: pd.DataFrame, bootstrap_df: pd.DataFrame) -> pd.DataFrame:
+def build_long_metrics(
+    summary_df: pd.DataFrame,
+    bootstrap_df: pd.DataFrame,
+    pair_detail_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """Combines the AP/AUC/calibration summary and bootstrap CIs into one tidy long table."""
     parts = [
         melt_to_long(summary_df, _SUMMARY_METRICS, "genre_discrimination"),
         melt_to_long(bootstrap_df, _BOOTSTRAP_METRICS, "bootstrap_ci"),
     ]
+    if pair_detail_df is not None:
+        #: Reports where an average precision is decided by one tie block rather than by ordering.
+        parts.append(tie_fractions_by_model(pair_detail_df))
     return finalise_long_metrics(parts)
 
 
@@ -54,14 +62,18 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary-csv", type=Path, required=True)
     parser.add_argument("--bootstrap-csv", type=Path, required=True)
+    parser.add_argument("--detail-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     summary_df = pd.read_csv(args.summary_csv)
     bootstrap_df = pd.read_csv(args.bootstrap_csv)
+    pair_detail_df = pd.read_parquet(
+        args.detail_dir / "genre_pair_detail.parquet", columns=["model", "raw_similarity"]
+    )
 
-    long_df = build_long_metrics(summary_df, bootstrap_df)
+    long_df = build_long_metrics(summary_df, bootstrap_df, pair_detail_df)
     write_dataframe_parquet(args.output_dir / "genre_metrics_long.parquet", long_df)
 
     wide_df = pivot_metrics_wide(long_df, ["model", "model_base", "text_variant"])

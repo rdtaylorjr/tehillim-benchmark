@@ -20,7 +20,7 @@ from library.embeddings import dataset_identifier
 from library.psalm_vectors import load_psalm_vectors
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import DEFAULT_MAX_WORKERS, map_in_order
+from library.worker_pool import map_in_order
 
 
 def score_model(
@@ -44,7 +44,7 @@ def compare_genre_models(
     pairs: list[GenrePair],
     model_paths: list[Path],
     half_verses_by_psalm: dict[int, list[int]],
-    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_workers: int | None = None,
 ) -> list[dict[str, str | int | float]]:
     """Scores every model file across workers, rows sorted by Average Precision descending."""
     score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs)

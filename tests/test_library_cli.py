@@ -4,7 +4,7 @@ from pathlib import Path
 from library.bhsa import DEFAULT_CHECKOUT
 from library.cli import add_scoring_arguments, load_cache
 from library.rows_output import write_rows_csv
-from library.worker_pool import DEFAULT_MAX_WORKERS
+from library.worker_pool import default_max_workers
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -18,7 +18,7 @@ def test_every_batch_script_gets_the_same_three_arguments() -> None:
     args = _parser().parse_args([])
 
     assert args.checkout == DEFAULT_CHECKOUT
-    assert args.workers == DEFAULT_MAX_WORKERS
+    assert args.workers == default_max_workers()
     assert args.output is None
 
 

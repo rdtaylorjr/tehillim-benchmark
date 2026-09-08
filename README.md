@@ -20,6 +20,8 @@ Average Precision is the primary outcome. Cosine similarity ranks annotated rela
 
 Confidence intervals use a psalm-clustered BCa bootstrap. Resampling whole psalms retains the dependence among relations drawn from the same poem. Genre confidence intervals use a vertex bootstrap that resamples psalms and reconstructs their derived pair population. The code applies Benjamini-Hochberg and Benjamini-Yekutieli adjustments within defined metric, source, and scope families. Per-genre permutation tests shuffle psalm labels and use a joint maxT null across genres. These procedures test evidence against the stated labels. They do not decide whether a representation has captured parallelism or genre as literary phenomena.
 
+When a vertex bootstrap resamples the same original psalm more than once, pairs between those repeated draws are excluded before scoring. Such pairs are constructed positives with cosine similarity `1.0`, rather than observed psalm pairs.
+
 For genre discrimination, each psalm vector is the mean of its available half-verse vectors. The evaluator scores all 11,175 unordered psalm pairs, labeling a pair positive when both psalms share the supplied source genre. It reports pooled and one-versus-rest Average Precision and AUC. The unequal class sizes make pooled outcomes largely responsive to prevalent genres, so genre-specific results remain necessary.
 
 Trajectory analysis retains half-verse order. It derives a psalm centroid, an ordered cosine self-similarity matrix, adjacent similarity, step magnitude, and turning angle. Structural profiles are compared after length-normalized resampling or dynamic-time-warping alignment. Permutation tests compare within- and between-genre distances before and after residualizing distance on length difference, then on length difference and content distance. These controls identify whether an association persists under those specified nuisance models. They do not supply a theory-free separation of form from meaning.
@@ -51,6 +53,8 @@ A future confirmatory pass should fix representation choices on a predetermined 
 
 Python 3.10 or later and the dependencies in `pyproject.toml` are required. The BHSA checkout is pinned to `v1.8.1` and the Logos Text-Fabric module to `v1.0`. Unit tests run without licensed annotations or vector files. Integration runs require permitted access to the Logos features, the source genre CSV, a local embeddings checkout, and a writable data checkout. The scripts accept model names, input paths, seeds, control settings, and output partitions. The emitted public payloads do not yet carry a complete manifest of those inputs or a source-code revision. The result-version discrepancy above shows why a release manifest is necessary. Byte-identical reproduction depends on access to the same external annotation and model artifacts.
 
+Sparse `morph_signature` trigram partitions require the library's sparse evaluation path. The standard batch commands do not dispatch to that path.
+
 ## Installation
 
 ```bash
@@ -61,7 +65,7 @@ python3 -m venv .venv
 
 ## Usage
 
-Run a benchmark script with an embeddings directory and a matching output directory in a local `tehillim-data` checkout. `DOCUMENTATION.md` specifies the commands, inputs, outputs, and rerun dependencies.
+Run a benchmark script with an embeddings directory and a matching output directory in a local `tehillim-data` checkout.
 
 ```bash
 .venv/bin/python -m genre.scripts.compare_models \
@@ -80,6 +84,8 @@ Efron, Bradley. 1987. [“Better Bootstrap Confidence Intervals.”](https://doi
 
 de la Selle, Théotime, and Laurence Mellerin. [“Detection and Typology of Psalmic Text Reuses in the New Testament.”](https://doi.org/10.3390/rel17010088) *Religions* 17, no. 1 (2026): 88.
 
+Davis, Jesse, and Mark Goadrich. 2006. [“The Relationship Between Precision-Recall and ROC Curves.”](https://doi.org/10.1145/1143844.1143874) In *Proceedings of the 23rd International Conference on Machine Learning*, 233-240. ACM.
+
 Gillmayr-Bucher, Susanne. [“Relecture of Biblical Psalms: A Computer Aided Analysis of Textual Relations Based on Semantic Domains.”](https://doi.org/10.1163/9789004493339_021) Pages 309-321 in *Bible and Computer: The Stellenbosch AIBI-6 Conference*. Leiden: Brill, 2002.
 
 Montaner, Luis Vegas. “Masoretic Tradition and Syntactic Analysis of the Psalms.” Pages 317-335 in *Tradition and Innovation in Biblical Interpretation: Studies Presented to Professor Eep Talstra on the Occasion of His Sixty-Fifth Birthday*, 2011.
@@ -87,6 +93,8 @@ Montaner, Luis Vegas. “Masoretic Tradition and Syntactic Analysis of the Psalm
 Muennighoff, Niklas, Nouamane Tazi, Loic Magne, and Nils Reimers. 2023. [“MTEB: Massive Text Embedding Benchmark.”](https://aclanthology.org/2023.eacl-main.148/) In *Proceedings of EACL 2023*, 2014-2037.
 
 Naaijer, Martijn, and Dirk Roorda. [“Parallel Texts in the Hebrew Bible, New Methods and Visualizations.”](https://doi.org/10.48550/arXiv.1603.01541) 2016.
+
+Phipson, Belinda, and Gordon K. Smyth. 2010. [“Permutation P-values Should Never Be Zero: Calculating Exact P-values When Permutations Are Randomly Drawn.”](https://doi.org/10.2202/1544-6115.1585) *Statistical Applications in Genetics and Molecular Biology* 9.1.
 
 Roorda, Dirk, Christiaan Erwich, Cody Kingham, and SeHoon Park. 2023. [*ETCBC/bhsa*](https://github.com/ETCBC/bhsa).
 

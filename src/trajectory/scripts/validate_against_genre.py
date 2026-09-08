@@ -18,7 +18,7 @@ from library.multiple_comparisons import (
 )
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import DEFAULT_MAX_WORKERS, map_in_order
+from library.worker_pool import map_in_order
 from trajectory.genre_breakdown import joint_genre_breakdown_permutation_test
 from trajectory.residualize import residualize_by_length, residualize_on_covariates
 from trajectory.validation import permutation_test, same_genre_matrix
@@ -300,7 +300,7 @@ def validate_models(
     n_half_verses: dict[int, int],
     n_permutations: int,
     seed: int,
-    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_workers: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str | int | float]]]:
     """Models are independent, so they run across workers and are reassembled in submit order."""
     tasks = [

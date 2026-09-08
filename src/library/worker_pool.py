@@ -2,11 +2,30 @@
 
 # Named for the pool: "parallelism" here is the Hebrew poetic kind, benchmarked in src/parallelism.
 
+import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 
-# Measured over one shuffle family of 100 draws: 55s at 2 workers, 50s at 3, 65s at 5.
-DEFAULT_MAX_WORKERS = 3
+#: Every backend numpy might link, since each reads only its own variable.
+BLAS_THREAD_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    #: numpy links Accelerate on this platform, which ignores the OpenMP variable entirely.
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
+
+def pin_worker_blas_threads() -> None:
+    """Gives each worker a single BLAS thread, leaving an operator's explicit setting alone."""
+    for variable in BLAS_THREAD_VARIABLES:
+        os.environ.setdefault(variable, "1")
+
+
+def default_max_workers() -> int:
+    """One worker per core, which only pays once each worker's BLAS is pinned to one thread."""
+    return os.cpu_count() or 1
 
 
 def chunksize_for(n_items: int, max_workers: int) -> int:
@@ -17,10 +36,13 @@ def chunksize_for(n_items: int, max_workers: int) -> int:
 def map_in_order[ItemT, ResultT](
     fn: Callable[[ItemT], ResultT],
     items: Sequence[ItemT],
-    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_workers: int | None = None,
 ) -> list[ResultT]:
     """Applies fn to every item, returning results in submission order so reruns stay comparable."""
-    if max_workers <= 1 or len(items) <= 1:
+    workers = default_max_workers() if max_workers is None else max_workers
+    if workers <= 1 or len(items) <= 1:
         return [fn(item) for item in items]
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
-        return list(pool.map(fn, items, chunksize=chunksize_for(len(items), max_workers)))
+    #: Set before the pool spawns, because a worker reads these only as it imports numpy.
+    pin_worker_blas_threads()
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(fn, items, chunksize=chunksize_for(len(items), workers)))

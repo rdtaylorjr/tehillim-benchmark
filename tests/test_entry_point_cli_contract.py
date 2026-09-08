@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
+import subprocess
+import sys
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -103,3 +107,42 @@ class TestEveryCorpusReadingEntryPointInjectsItsLoader:
         signature = inspect.signature(_module(name).main)
 
         assert "api_factory" not in signature.parameters
+
+
+class TestEveryEntryPointRunsAsAModule:
+    """Importing a module runs all of it; `python -m` stops at the guard, which hid a NameError."""
+
+    @pytest.mark.parametrize("name", ENTRY_POINTS)
+    def test_nothing_is_defined_after_the_main_guard(self, name: str) -> None:
+        source = inspect.getsource(_module(name))
+        tree = ast.parse(source)
+        guard = next(
+            (
+                n.lineno
+                for n in tree.body
+                if isinstance(n, ast.If) and "__main__" in ast.dump(n.test)
+            ),
+            None,
+        )
+        if guard is None:
+            pytest.skip("module has no __main__ guard")
+        after = [
+            n.name
+            for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.ClassDef)) and n.lineno > guard
+        ]
+
+        assert after == []
+
+    @pytest.mark.parametrize("name", ENTRY_POINTS)
+    def test_the_module_runs_from_the_command_line(self, name: str) -> None:
+        """--help exercises the real `python -m` path, which importing the module never does."""
+        completed = subprocess.run(
+            [sys.executable, "-m", name, "--help"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert completed.returncode == 0, completed.stderr[-400:]

@@ -13,7 +13,7 @@ from library.embeddings import dataset_identifier
 from library.protocol import DEFAULT_N_GROUP_PERMUTATIONS
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import DEFAULT_MAX_WORKERS, map_in_order
+from library.worker_pool import map_in_order
 from parallelism.evaluate import score_embedding_file
 from parallelism.pairs import RetrievalPair, build_retrieval_pairs
 from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups
@@ -68,7 +68,7 @@ def compare_models(
     model_paths: list[Path],
     n_permutations: int = DEFAULT_N_GROUP_PERMUTATIONS,
     seed: int = 0,
-    max_workers: int = DEFAULT_MAX_WORKERS,
+    max_workers: int | None = None,
 ) -> list[dict[str, str | int | float]]:
     """Scores every model file across workers, rows sorted by separation AUC descending."""
     score = partial(score_model, pairs=pairs, n_permutations=n_permutations, seed=seed)

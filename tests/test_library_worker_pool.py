@@ -1,8 +1,8 @@
 import os
 
 from library.worker_pool import (
-    DEFAULT_MAX_WORKERS,
     chunksize_for,
+    default_max_workers,
     map_in_order,
 )
 
@@ -51,7 +51,7 @@ def test_map_in_order_handles_an_empty_item_list() -> None:
 
 
 def test_default_max_workers_is_a_positive_worker_count() -> None:
-    assert DEFAULT_MAX_WORKERS >= 1
+    assert default_max_workers() >= 1
 
 
 def test_map_in_order_chunks_work_so_a_shared_payload_is_not_repickled_per_item() -> None:
@@ -68,6 +68,6 @@ def test_chunksize_is_never_zero() -> None:
 
 
 def test_default_worker_count_does_not_oversubscribe_the_machine() -> None:
-    """Scoring is compute-bound, so extra processes contend for the same BLAS threads."""
-    #: More processes than cores oversubscribes the BLAS threads each worker already spawns.
-    assert 1 <= DEFAULT_MAX_WORKERS <= (os.cpu_count() or 1)
+    """Scoring is compute-bound, so one worker per core is the most the machine can run."""
+    #: Safe only because the pool pins each worker's BLAS to a single thread before spawning.
+    assert 1 <= default_max_workers() <= (os.cpu_count() or 1)
