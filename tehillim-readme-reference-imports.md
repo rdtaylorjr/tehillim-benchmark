@@ -31,4 +31,4 @@ Use `K8UN4YPX` for the versioned `ETCBC/bhsa` Zenodo release. Use `3GJ8SC7X` for
 
 ## Citation conditions
 
-The MTEB record belongs in `tehillim-benchmarks` only if the README defines a methodological relation to MTEB. The DSS2ETCBC software record needs a commit-pinned version before use in a dissertation or article.
+The MTEB record belongs in `tehillim-benchmark` only if the README defines a methodological relation to MTEB. The DSS2ETCBC software record needs a commit-pinned version before use in a dissertation or article.

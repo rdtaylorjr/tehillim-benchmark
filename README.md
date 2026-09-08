@@ -1,4 +1,4 @@
-# tehillim-benchmarks
+# tehillim-benchmark
 
 ## Overview
 

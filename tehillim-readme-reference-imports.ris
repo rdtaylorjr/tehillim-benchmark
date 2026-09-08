@@ -12,7 +12,7 @@ SP  - 2014
 EP  - 2037
 DO  - 10.18653/v1/2023.eacl-main.148
 UR  - https://aclanthology.org/2023.eacl-main.148/
-KW  - tehillim-benchmarks
+KW  - tehillim-benchmark
 KW  - embedding evaluation
 N1  - Cite only if the README explains the relation between this repository's protocol and MTEB.
 ER  - 
@@ -28,7 +28,7 @@ IS  - 1
 SP  - 43
 EP  - 49
 DO  - 10.1109/TASSP.1978.1163055
-KW  - tehillim-benchmarks
+KW  - tehillim-benchmark
 KW  - dynamic time warping
 ER  - 
 
@@ -45,7 +45,7 @@ VL  - 92
 SP  - 381
 EP  - 397
 DO  - 10.1016/j.neuroimage.2014.01.060
-KW  - tehillim-benchmarks
+KW  - tehillim-benchmark
 KW  - permutation inference
 ER  - 
 
@@ -61,7 +61,7 @@ SP  - 233
 EP  - 240
 DO  - 10.1145/1143844.1143874
 UR  - https://doi.org/10.1145/1143844.1143874
-KW  - tehillim-benchmarks
+KW  - tehillim-benchmark
 KW  - retrieval evaluation
 ER  - 
 
@@ -76,7 +76,7 @@ IS  - 1
 SP  - 39
 DO  - 10.2202/1544-6115.1585
 UR  - https://doi.org/10.2202/1544-6115.1585
-KW  - tehillim-benchmarks
+KW  - tehillim-benchmark
 KW  - tehillim-trublet
 KW  - Monte Carlo inference
 ER  - 
