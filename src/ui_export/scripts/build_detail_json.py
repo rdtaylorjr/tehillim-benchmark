@@ -153,7 +153,8 @@ class _DomainSources(NamedTuple):
 
 def _dataset(data_dir: Path, benchmark: str, domain: str, stage: str, name: str) -> Path:
     """The hive path of one dataset, so the layout is written once rather than at every call."""
-    return data_dir / f"benchmark={benchmark}/domain={domain}/stage={stage}/{name}"
+    partition = f"analysis=benchmark/benchmark={benchmark}/domain={domain}/stage={stage}"
+    return data_dir / partition / name
 
 
 def _grouped_by_model(
@@ -294,7 +295,7 @@ def main(
         help="directory holding ui_<domain>.json, which the site carries, not the data repo",
     )
     parser.add_argument(
-        "--domains", nargs="+", default=["lexical", "morphology", "semantic", "syntax"]
+        "--domains", nargs="+", default=["lexical", "morphological", "semantic", "syntactic"]
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     add_scoring_arguments(parser)

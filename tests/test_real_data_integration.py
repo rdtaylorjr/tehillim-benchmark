@@ -18,8 +18,10 @@ DATA_ROOT = Path(
         Path.home() / "Developer" / "research" / "tehillim-embeddings" / "data",
     )
 )
-DENSE = DATA_ROOT / "domain=morphology/feature=sp/construction=1_2_3gram/part-0.parquet"
-SPARSE = DATA_ROOT / "domain=syntax/level=phrase/feature=typ/construction=1_2_3gram/part-0.parquet"
+DENSE = DATA_ROOT / "domain=morphological/feature=sp/construction=1_2_3gram/part-0.parquet"
+SPARSE = (
+    DATA_ROOT / "domain=syntactic/level=phrase/feature=typ/construction=1_2_3gram/part-0.parquet"
+)
 
 pytestmark = [
     pytest.mark.integration,

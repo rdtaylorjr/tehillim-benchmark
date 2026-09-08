@@ -535,12 +535,14 @@ def test_split_payloads_separates_the_per_genre_trajectory_rows() -> None:
 
 
 def test_split_payloads_yields_no_slices_when_there_are_no_by_genre_rows() -> None:
-    core, slices = export.split_payloads("syntax", {"genre_overall": [], "trajectory_by_genre": []})
+    core, slices = export.split_payloads(
+        "syntactic", {"genre_overall": [], "trajectory_by_genre": []}
+    )
     assert slices == {}
-    assert core["syntax"]["genre_overall"] == []
+    assert core["syntactic"]["genre_overall"] == []
 
 
 def test_split_payloads_leaves_a_payload_without_the_section_alone() -> None:
-    core, slices = export.split_payloads("syntax", {"genre_overall": []})
-    assert core == {"syntax": {"genre_overall": []}}
+    core, slices = export.split_payloads("syntactic", {"genre_overall": []})
+    assert core == {"syntactic": {"genre_overall": []}}
     assert slices == {}

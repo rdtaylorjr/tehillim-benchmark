@@ -46,7 +46,7 @@ def test_score_model_raises_when_the_population_cannot_support_a_ci(
 def test_score_model_raises_when_only_one_psalm_vector_survives(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
-    """A background needs two vectors, and one syntax model leaves only one."""
+    """A background needs two vectors, and one syntactic model leaves only one."""
     path = write_embeddings_parquet(
         tmp_path / "domain=d" / "model=lonely" / "v.parquet", {1: [1.0, 0.0]}
     )

@@ -225,7 +225,9 @@ def _genre_pair_df() -> pd.DataFrame:
 
 def _build(output_dir: Path, **overrides: object) -> list[str]:
     """Runs build_one_model with every section absent unless the test supplies it."""
-    build_one_model("m", "syntax", output_dir, ["Hymn", "Lament"], ModelDetailInputs(**overrides))
+    build_one_model(
+        "m", "syntactic", output_dir, ["Hymn", "Lament"], ModelDetailInputs(**overrides)
+    )
     return sorted(p.name for p in output_dir.glob("*.json"))
 
 
@@ -238,12 +240,12 @@ class TestBuildOneModel:
             genre_pair=_genre_pair_df(),
         )
 
-        assert written == ["detail_syntax_m_genre.json", "detail_syntax_m_parallelism.json"]
+        assert written == ["detail_syntactic_m_genre.json", "detail_syntactic_m_parallelism.json"]
 
     def test_omits_a_section_whose_frame_is_absent(self, tmp_path: Path) -> None:
         written = _build(tmp_path, genre_pair=_genre_pair_df())
 
-        assert written == ["detail_syntax_m_genre.json"]
+        assert written == ["detail_syntactic_m_genre.json"]
 
     def test_omits_a_section_whose_frame_is_empty(self, tmp_path: Path) -> None:
         """An empty frame reaches the builders as a real model with nothing to plot."""
@@ -254,7 +256,7 @@ class TestBuildOneModel:
             baseline_detail=_baseline_detail_df(),
         )
 
-        assert written == ["detail_syntax_m_genre.json"]
+        assert written == ["detail_syntactic_m_genre.json"]
 
     def test_writes_nothing_when_no_section_has_data(self, tmp_path: Path) -> None:
         """A model in the tables but absent from every detail parquet is skipped silently."""
@@ -275,10 +277,10 @@ class TestBuildOneModel:
             genre_pair=_genre_pair_df(),
         )
 
-        body = json.loads((tmp_path / "detail_syntax_m_genre.json").read_text())
+        body = json.loads((tmp_path / "detail_syntactic_m_genre.json").read_text())
         assert set(body) == {"model", "domain", "genre"}
         assert body["model"] == "m"
-        assert body["domain"] == "syntax"
+        assert body["domain"] == "syntactic"
 
 
 def _trajectory_df() -> pd.DataFrame:
@@ -312,7 +314,7 @@ class TestBuildOneModelTrajectory:
             tmp_path, trajectory=_trajectory_df(), trajectory_metric="structural_distance"
         )
 
-        assert written == ["detail_syntax_m_trajectory.json"]
+        assert written == ["detail_syntactic_m_trajectory.json"]
 
     def test_omits_trajectory_when_no_primary_metric_could_be_chosen(self, tmp_path: Path) -> None:
         """choose_primary_metric returns None when every source p-value is NaN for that model."""
@@ -323,10 +325,10 @@ class TestBuildOneModelTrajectory:
 
 def _write_domain_tree(root: Path, domain: str) -> None:
     """A minimal tehillim-data tree: two models in the parallelism tables, one also in genre."""
-    par = root / f"benchmark=parallelism/domain={domain}/stage=detail"
-    gen = root / f"benchmark=genre/domain={domain}/stage=detail"
-    traj = root / f"benchmark=trajectory/domain={domain}/stage=profiles"
-    raw = root / f"benchmark=trajectory/domain={domain}/stage=raw"
+    par = root / f"analysis=benchmark/benchmark=parallelism/domain={domain}/stage=detail"
+    gen = root / f"analysis=benchmark/benchmark=genre/domain={domain}/stage=detail"
+    traj = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=profiles"
+    raw = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=raw"
     for d in (par, gen, traj, raw):
         d.mkdir(parents=True, exist_ok=True)
 
@@ -393,10 +395,10 @@ def _domain_payload() -> dict[str, object]:
 class TestBuildDomain:
     def test_writes_a_file_for_every_model_section_that_has_data(self, tmp_path: Path) -> None:
         data_dir, output_dir = tmp_path / "data", tmp_path / "out"
-        _write_domain_tree(data_dir, "syntax")
+        _write_domain_tree(data_dir, "syntactic")
 
         written = build_domain(
-            "syntax",
+            "syntactic",
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
@@ -407,20 +409,20 @@ class TestBuildDomain:
 
         names = sorted(p.name for p in output_dir.glob("*.json"))
         assert names == [
-            "detail_syntax_a_genre.json",
-            "detail_syntax_a_parallelism.json",
-            "detail_syntax_a_trajectory.json",
-            "detail_syntax_b_parallelism.json",
+            "detail_syntactic_a_genre.json",
+            "detail_syntactic_a_parallelism.json",
+            "detail_syntactic_a_trajectory.json",
+            "detail_syntactic_b_parallelism.json",
         ]
         assert written == len(names)
 
     def test_a_model_absent_from_a_table_gets_no_section_for_it(self, tmp_path: Path) -> None:
         """Model b is only in the parallelism table, so it must never gain a genre file."""
         data_dir, output_dir = tmp_path / "data", tmp_path / "out"
-        _write_domain_tree(data_dir, "syntax")
+        _write_domain_tree(data_dir, "syntactic")
 
         build_domain(
-            "syntax",
+            "syntactic",
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
@@ -429,17 +431,21 @@ class TestBuildDomain:
             max_workers=1,
         )
 
-        assert not (output_dir / "detail_syntax_b_genre.json").exists()
+        assert not (output_dir / "detail_syntactic_b_genre.json").exists()
 
     def test_a_missing_optional_genre_parquet_leaves_every_other_section_intact(
         self, tmp_path: Path
     ) -> None:
         data_dir, output_dir = tmp_path / "data", tmp_path / "out"
-        _write_domain_tree(data_dir, "syntax")
-        (data_dir / "benchmark=genre/domain=syntax/stage=detail/genre_pair_detail.parquet").unlink()
+        _write_domain_tree(data_dir, "syntactic")
+        (
+            data_dir
+            / "analysis=benchmark/benchmark=genre/domain=syntactic/stage=detail"
+            / "genre_pair_detail.parquet"
+        ).unlink()
 
         build_domain(
-            "syntax",
+            "syntactic",
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
@@ -449,8 +455,8 @@ class TestBuildDomain:
         )
 
         names = sorted(p.name for p in output_dir.glob("*.json"))
-        assert "detail_syntax_a_genre.json" not in names
-        assert "detail_syntax_a_parallelism.json" in names
+        assert "detail_syntactic_a_genre.json" not in names
+        assert "detail_syntactic_a_parallelism.json" in names
 
 
 def test_a_task_names_itself_by_its_model_for_the_skip_report() -> None:

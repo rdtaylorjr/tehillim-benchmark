@@ -10,7 +10,7 @@ from library.rows_output import write_text
 DomainData = dict[str, list[dict[str, object]]]
 Domains = dict[str, DomainData]
 
-ALL_DOMAIN_IDS = ("semantic", "lexical", "phonology", "morphology", "syntax", "discourse")
+ALL_DOMAIN_IDS = ("semantic", "lexical", "phonological", "morphological", "syntactic", "discourse")
 
 _EMPTY_DOMAIN_DATA: DomainData = {
     "parallelism_overall": [],

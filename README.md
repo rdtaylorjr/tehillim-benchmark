@@ -8,7 +8,7 @@ This repository evaluates representations of Biblical Hebrew against two fixed P
 
 The parallelism benchmark reads `parallel_*` Text-Fabric features released by [tehillim-logos](https://github.com/rdtaylorjr/tehillim-logos) on ETCBC BHSA `half_verse` nodes. The features encode aligned group membership, type, signature, member span, and an ambiguity flag. They derive from Logos Bible Software's *Psalms Explorer Dataset*, used with permission. A separate runtime CSV assigns one of seven source genres to each of the 150 psalms. Neither licensed annotation source is committed here.
 
-The repository reads dense and sparse Parquet vectors keyed by BHSA node identifier from `tehillim-embeddings`. It writes CSV, Parquet, and JSON outputs to `tehillim-data` under `benchmark={parallelism,genre,trajectory}/domain={...}/stage={...}`. This division keeps code, source annotation, representations, and derived results independently inspectable.
+The repository reads dense and sparse Parquet vectors keyed by BHSA node identifier from `tehillim-embeddings`. It writes CSV, Parquet, and JSON outputs to `tehillim-data` under `analysis=benchmark/benchmark={parallelism,genre,trajectory}/domain={...}/stage={...}`. This division keeps code, source annotation, representations, and derived results independently inspectable.
 
 The data are operational annotations rather than neutral descriptions of poetic form. Logos supplies neither an annotation protocol nor adjudication history nor inter-annotator reliability estimate. BHSA `half_verse` boundaries and its morphosyntactic features also embody ETCBC analytic decisions. The benchmark preserves these choices as data conditions and reports their consequences without treating them as settled linguistic categories.
 
@@ -33,8 +33,8 @@ The current public interface payloads contain 148 parallelism variants and 222 g
 | Domain | Parallelism maximum AP | Genre maximum AP |
 | --- | --- | --- |
 | Semantic | `kalm_embedding_gemma3_12b_2511_cantillation`, 0.395 | `gemini_embedding_2_cantillation`, 0.400 |
-| ETCBC syntax | `phrase_subphrase_rela_1gram`, 0.384 | `phrase_marginal_typ_function`, 0.357 |
-| Morphology | `morph_prs_ps_sp_plus`, 0.383 | `morph_prs_ps_sp_plus`, 0.356 |
+| Syntactic | `phrase_subphrase_rela_1gram`, 0.384 | `phrase_marginal_typ_function`, 0.357 |
+| Morphological | `morph_prs_ps_sp_plus`, 0.383 | `morph_prs_ps_sp_plus`, 0.356 |
 | Lexical | `homograph_log_count`, 0.344 | `word_consonantal_icf_position_mean_psalm`, 0.460 |
 
 The semantic parallelism maximum is calculated from 1,110 annotated relations and 2,784 local control pairs, giving an AP prevalence of 0.285. The 2,292 source groups become this scored relation set through explicit losses: 790 groups produce no relation under the signature rule, while 2,292 of 3,450 generated candidate pairs resolve to one half-verse, 43 include an ambiguous member, and five lack a member. The local control includes an annotation-bearing node in 2,720 pairs. Only 64 adjacent bicola carry no `parallel_*` annotation. Genre outcomes use the 11,175 unordered psalm pairs. These maxima summarize different input families and class prevalences. They do not supply a common scale of linguistic adequacy or a model-selection rule.
@@ -71,7 +71,7 @@ Run a benchmark script with an embeddings directory and a matching output direct
 .venv/bin/python -m genre.scripts.compare_models \
   /path/to/genre-labels.csv \
   /path/to/tehillim-embeddings/data \
-  --output /path/to/tehillim-data/benchmark=genre/domain=semantic/stage=raw/summary.csv
+  --output /path/to/tehillim-data/analysis=benchmark/benchmark=genre/domain=semantic/stage=raw/summary.csv
 ```
 
 ## References
