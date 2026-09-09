@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import scipy.sparse as sp
 
 from library.bhsa import (
@@ -27,6 +26,7 @@ from library.embeddings import (
     load_embeddings,
     load_sparse_embeddings,
 )
+from library.frame_accumulator import FrameAccumulator
 from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
 from library.retrieval_metrics import (
@@ -344,15 +344,15 @@ def main(
     baseline_pairs = as_node_pairs(baseline_pairs_raw)
     background_node_ids = [n for n in list_psalms_half_verse_nodes(api) if n not in marked_nodes]
 
-    (cached_pair_rows, cached_baseline_rows, cached_scope_rows), cached_models = (
-        load_cached_parquet_set(args.output_dir, _OUTPUT_FILES)
+    (cached_pairs, cached_baselines, cached_scopes), cached_models = load_cached_parquet_set(
+        args.output_dir, _OUTPUT_FILES
     )
     report_reuse(cached_models, args.output_dir)
 
     model_paths = uncached_model_paths(args.embeddings_dir, cached_models)
-    pair_rows: list[dict[str, Any]] = list(cached_pair_rows)
-    baseline_rows: list[dict[str, Any]] = list(cached_baseline_rows)
-    scope_rows: list[dict[str, Any]] = list(cached_scope_rows)
+    pair_rows = FrameAccumulator(cached_pairs)
+    baseline_rows = FrameAccumulator(cached_baselines)
+    scope_rows = FrameAccumulator(cached_scopes)
     score = partial(
         score_model,
         all_pairs=all_pairs,
@@ -368,12 +368,9 @@ def main(
         baseline_rows.extend(model_baselines)
         scope_rows.extend(model_scopes)
 
-    write_dataframe_parquet(args.output_dir / "pair_detail.parquet", pd.DataFrame(pair_rows))
-    write_dataframe_parquet(
-        args.output_dir / "baseline_detail.parquet",
-        pd.DataFrame(baseline_rows),
-    )
-    write_dataframe_parquet(args.output_dir / "type_vs_baseline.parquet", pd.DataFrame(scope_rows))
+    write_dataframe_parquet(args.output_dir / "pair_detail.parquet", pair_rows.frame())
+    write_dataframe_parquet(args.output_dir / "baseline_detail.parquet", baseline_rows.frame())
+    write_dataframe_parquet(args.output_dir / "type_vs_baseline.parquet", scope_rows.frame())
     print(f"wrote {len(pair_rows)} pair rows, {len(baseline_rows)} baseline rows")
     print(f"wrote {len(scope_rows)} type scope rows")
 

@@ -22,16 +22,16 @@ def load_cached_rows(
 
 def load_cached_parquet_set(
     output_dir: Path, filenames: tuple[str, ...]
-) -> tuple[list[list[dict[str, Any]]], set[str]]:
-    """Reads several prior output parquet files' rows and the model set covered by all of them."""
-    rows_by_file: list[list[dict[str, Any]]] = []
+) -> tuple[list["pd.DataFrame"], set[str]]:
+    """Reads several prior output parquet files and the model set covered by all of them."""
+    frames: list[pd.DataFrame] = []
     models: set[str] | None = None
     for name in filenames:
         path = output_dir / name
         if not path.exists():
-            return [[] for _ in filenames], set()
+            return [pd.DataFrame() for _ in filenames], set()
         df = pd.read_parquet(path)
-        rows_by_file.append(df.to_dict("records"))
+        frames.append(df)
         file_models = set(df["model"].unique())
         models = file_models if models is None else models & file_models
-    return rows_by_file, models or set()
+    return frames, models or set()

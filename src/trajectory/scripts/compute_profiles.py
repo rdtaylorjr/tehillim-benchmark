@@ -19,6 +19,7 @@ from library.embeddings import (
     load_embeddings,
     load_sparse_embeddings,
 )
+from library.frame_accumulator import FrameAccumulator
 from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
 from library.rows_output import write_dataframe_parquet
@@ -148,7 +149,7 @@ def main(
     api = api_factory(args.checkout)
     half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
 
-    (cached_distance_rows,), cached_models = load_cached_parquet_set(
+    (cached_distances,), cached_models = load_cached_parquet_set(
         args.output_dir, ("trajectory_distances.parquet",)
     )
     report_reuse(cached_models, args.output_dir)
@@ -158,7 +159,7 @@ def main(
         model for model in cached_models if profile_shard_path(args.output_dir, model).exists()
     }
     model_paths = uncached_model_paths(args.embeddings_dir, complete)
-    all_distance_rows: list[dict[str, Any]] = list(cached_distance_rows)
+    distances = FrameAccumulator(cached_distances)
     n_profile_rows = 0
     score = partial(
         score_model, half_verses_by_psalm=half_verses_by_psalm, output_dir=args.output_dir
@@ -168,15 +169,15 @@ def main(
             continue
         model_n_rows, model_distance_rows = scored
         n_profile_rows += model_n_rows
-        all_distance_rows.extend(model_distance_rows)
+        distances.extend(model_distance_rows)
 
     write_dataframe_parquet(
         args.output_dir / "trajectory_distances.parquet",
-        pd.DataFrame(all_distance_rows),
+        distances.frame(),
         compression="zstd",
         compression_level=19,
     )
-    print(f"wrote {n_profile_rows} profile rows, {len(all_distance_rows)} distance rows")
+    print(f"wrote {n_profile_rows} profile rows, {len(distances)} distance rows")
 
 
 if __name__ == "__main__":
