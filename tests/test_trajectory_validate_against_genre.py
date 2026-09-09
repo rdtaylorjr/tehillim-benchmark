@@ -7,19 +7,21 @@ import pytest
 from library.multiple_comparisons import benjamini_hochberg, benjamini_yekutieli
 from trajectory.scripts.validate_against_genre import (
     _METRICS,
-    _null_gaps,
     add_fdr_columns,
     add_genre_breakdown_fdr_columns,
     breakdown_path_for,
     build_genre_breakdown_rows,
     build_validation_row,
-    observed_gap,
-    permutation_test,
     residualize_by_length,
     residualize_on_covariates,
-    same_genre_matrix,
     validate_models,
     validate_one_model,
+)
+from trajectory.validation import (
+    _null_gaps,
+    observed_gap,
+    permutation_test,
+    same_genre_matrix,
 )
 
 
@@ -69,13 +71,12 @@ def test_permutation_test_reports_a_large_p_value_when_there_is_no_signal() -> N
 
     assert observed == pytest.approx(0.0)
     assert p_value > 0.05
-    # Every permutation of a constant-valued array gives the same (zero) gap: the
-    # null has zero variance, so the z-score is undefined rather than a fake 0/0->0.
+    # A constant array gives a zero gap under every permutation, so the z-score is undefined.
     assert np.isnan(effect_size)
 
 
 def test_permutation_test_effect_size_matches_a_manual_z_score_against_the_null() -> None:
-    """Effect size is exactly (observed - null_gaps.mean()) / null_gaps.std()."""
+    """Effect size is (observed - null mean) / null SD, with the ddof=1 sample SD throughout."""
     idx_a = np.array([0, 0, 0, 1, 1, 2])
     idx_b = np.array([1, 2, 3, 2, 3, 3])
     genre_labels = np.array(["A", "B", "A", "B"])
@@ -88,7 +89,7 @@ def test_permutation_test_effect_size_matches_a_manual_z_score_against_the_null(
     expected_null = _null_gaps(same_matrix, distances)
     same_genre = genre_labels[idx_a] == genre_labels[idx_b]
     expected_observed = observed_gap(distances, same_genre)
-    expected_effect_size = (expected_observed - expected_null.mean()) / expected_null.std()
+    expected_effect_size = (expected_observed - expected_null.mean()) / expected_null.std(ddof=1)
 
     observed, _, effect_size = permutation_test(
         idx_a, idx_b, distances, genre_labels, n_permutations=500, rng=np.random.default_rng(3)
@@ -190,33 +191,31 @@ def _base_subset() -> tuple[pd.DataFrame, dict[int, int], np.ndarray, dict[int, 
     )
     index_of = {1: 0, 2: 1, 3: 2, 4: 3}
     genre_labels = np.array(["A", "A", "B", "B"])
-    n_cola = {1: 10, 2: 12, 3: 8, 4: 20}
-    return base_subset, index_of, genre_labels, n_cola
+    n_half_verses = {1: 10, 2: 12, 3: 8, 4: 20}
+    return base_subset, index_of, genre_labels, n_half_verses
 
 
 def test_build_validation_row_reports_full_pair_counts_when_nothing_is_nan() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
 
     row = build_validation_row(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 500, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 500, 0
     )
 
     assert row["n_pairs_total"] == 6
     assert row["n_pairs_valid"] == 6
     assert not np.isnan(row["raw_gap"])
     assert not np.isnan(row["raw_p"])
-    # metric_x = [0.1..0.6] is a symmetric arithmetic sequence: every 2-2 genre
-    # bipartition of these 4 psalms gives the same (zero) gap, so the null has no
-    # variance here and the effect size is correctly undefined, not a bug.
+    # Every 2-2 bipartition of this arithmetic sequence gives zero gap, so effect size is undefined.
     assert np.isnan(row["raw_effect_size"])
 
 
 def test_build_validation_row_excludes_nan_valued_pairs() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
     base_subset.loc[1, "metric_x"] = np.nan  # drops pair (1,3), a different-genre pair
 
     row = build_validation_row(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 500, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 500, 0
     )
 
     assert row["n_pairs_total"] == 6
@@ -225,11 +224,11 @@ def test_build_validation_row_excludes_nan_valued_pairs() -> None:
 
 
 def test_build_validation_row_returns_nan_when_too_few_valid_pairs_remain() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
     base_subset.loc[[1, 2, 3, 4, 5], "metric_x"] = np.nan  # only pair (1,2), same genre, survives
 
     row = build_validation_row(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 500, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 500, 0
     )
 
     assert row["n_pairs_valid"] == 1
@@ -246,10 +245,10 @@ def test_build_validation_row_returns_nan_when_too_few_valid_pairs_remain() -> N
 def test_build_validation_row_computes_length_and_content_controlled_for_non_content_metrics() -> (
     None
 ):
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
 
     row = build_validation_row(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 500, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 500, 0
     )
 
     assert not np.isnan(row["length_and_content_controlled_gap"])
@@ -259,10 +258,10 @@ def test_build_validation_row_computes_length_and_content_controlled_for_non_con
 
 def test_build_validation_row_content_distance_has_no_third_source() -> None:
     """Controlling content_distance for content_distance itself is not a meaningful comparison."""
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
 
     row = build_validation_row(
-        "model_a", "content_distance", base_subset, index_of, genre_labels, n_cola, 500, 0
+        "model_a", "content_distance", base_subset, index_of, genre_labels, n_half_verses, 500, 0
     )
 
     assert np.isnan(row["length_and_content_controlled_gap"])
@@ -377,10 +376,10 @@ def test_add_fdr_columns_scopes_correction_separately_per_source() -> None:
 
 
 def test_build_genre_breakdown_rows_has_one_row_per_genre_and_available_source() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
 
     rows = build_genre_breakdown_rows(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 200, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 200, 0
     )
 
     genres = {r["genre"] for r in rows}
@@ -394,10 +393,10 @@ def test_build_genre_breakdown_rows_has_one_row_per_genre_and_available_source()
 
 
 def test_build_genre_breakdown_rows_content_distance_has_no_third_source() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
 
     rows = build_genre_breakdown_rows(
-        "model_a", "content_distance", base_subset, index_of, genre_labels, n_cola, 200, 0
+        "model_a", "content_distance", base_subset, index_of, genre_labels, n_half_verses, 200, 0
     )
 
     sources = {r["source"] for r in rows}
@@ -405,11 +404,11 @@ def test_build_genre_breakdown_rows_content_distance_has_no_third_source() -> No
 
 
 def test_build_genre_breakdown_rows_empty_when_no_valid_pairs_remain() -> None:
-    base_subset, index_of, genre_labels, n_cola = _base_subset()
+    base_subset, index_of, genre_labels, n_half_verses = _base_subset()
     base_subset["metric_x"] = np.nan
 
     rows = build_genre_breakdown_rows(
-        "model_a", "metric_x", base_subset, index_of, genre_labels, n_cola, 200, 0
+        "model_a", "metric_x", base_subset, index_of, genre_labels, n_half_verses, 200, 0
     )
 
     assert rows == []
@@ -552,14 +551,14 @@ _GENRES = {
     7: "Wisdom",
     8: "Wisdom",
 }
-_N_COLA = {p: 10 + p for p in range(1, 9)}
+_N_HALF_VERSES = {p: 10 + p for p in range(1, 9)}
 
 
 def test_validate_one_model_returns_a_row_per_metric() -> None:
     df = _distances_frame()
     group = df[df.model == "phrase_a"]
 
-    rows, breakdown = validate_one_model("phrase_a", group, _GENRES, _N_COLA, 200, 0)
+    rows, breakdown = validate_one_model("phrase_a", group, _GENRES, _N_HALF_VERSES, 200, 0)
 
     assert {r["metric"] for r in rows} == set(_METRICS)
     assert all(r["model"] == "phrase_a" for r in rows)
@@ -569,11 +568,13 @@ def test_validate_one_model_returns_a_row_per_metric() -> None:
 def test_validate_models_matches_running_each_model_alone() -> None:
     df = _distances_frame()
 
-    together, _ = validate_models(df, _GENRES, _N_COLA, 200, 0, max_workers=2)
+    together, _ = validate_models(df, _GENRES, _N_HALF_VERSES, 200, 0, max_workers=2)
     apart = [
         row
         for model in sorted(df["model"].unique())
-        for row in validate_one_model(model, df[df.model == model], _GENRES, _N_COLA, 200, 0)[0]
+        for row in validate_one_model(
+            model, df[df.model == model], _GENRES, _N_HALF_VERSES, 200, 0
+        )[0]
     ]
 
     def key(row: dict) -> tuple[str, str]:
@@ -588,8 +589,8 @@ def test_validate_models_matches_running_each_model_alone() -> None:
 def test_validate_models_is_deterministic_regardless_of_worker_count() -> None:
     df = _distances_frame()
 
-    one, _ = validate_models(df, _GENRES, _N_COLA, 200, 0, max_workers=1)
-    four, _ = validate_models(df, _GENRES, _N_COLA, 200, 0, max_workers=4)
+    one, _ = validate_models(df, _GENRES, _N_HALF_VERSES, 200, 0, max_workers=1)
+    four, _ = validate_models(df, _GENRES, _N_HALF_VERSES, 200, 0, max_workers=4)
 
     def key(row: dict) -> tuple[str, str]:
         return (row["model"], row["metric"])
@@ -646,3 +647,45 @@ def test_breakdown_path_keeps_a_non_standard_stem() -> None:
     from pathlib import Path
 
     assert breakdown_path_for(Path("out/run7.csv")) == Path("out/run7_by_genre.csv")
+
+
+def test_null_gaps_chunks_permutations_without_changing_a_single_bit() -> None:
+    """Each permutation row is independent, so chunking must be exact, not merely close."""
+    from library.blocking import rows_per_block
+    from trajectory.validation import _null_gaps
+
+    rng = np.random.default_rng(11)
+    n_pairs = 400
+    n_rows = rows_per_block(n_pairs) * 2 + 5
+    same = rng.random((n_rows, n_pairs)) < 0.3
+    same[:, 0] = True
+    distances = rng.random(n_pairs)
+
+    chunked = _null_gaps(same, distances)
+    row_by_row = np.concatenate([_null_gaps(same[i : i + 1], distances) for i in range(n_rows)])
+
+    assert np.array_equal(chunked, row_by_row)
+
+
+def test_null_gaps_peak_memory_does_not_grow_with_the_permutation_count() -> None:
+    """Casting a 10000 by 11175 boolean to float64 costs 894 MB in one allocation."""
+    import tracemalloc
+
+    from trajectory.validation import _null_gaps
+
+    rng = np.random.default_rng(12)
+    n_pairs = 2000
+    distances = rng.random(n_pairs)
+
+    def peak_for(n_rows: int) -> int:
+        same = rng.random((n_rows, n_pairs)) < 0.3
+        same[:, 0] = True
+        tracemalloc.start()
+        _null_gaps(same, distances)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak
+
+    small, large = peak_for(500), peak_for(5000)
+
+    assert large < small * 3, f"peak grew from {small} to {large} with ten times the permutations"

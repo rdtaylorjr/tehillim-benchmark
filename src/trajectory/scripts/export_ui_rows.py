@@ -1,13 +1,13 @@
 """Converts validate_against_genre.py's validation.csv into the UI's JSON row shape."""
 
 import argparse
-import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from library.embeddings import split_model_name
+from library.rows_output import write_json
 
 _FIELDS = (
     "n_pairs_total",
@@ -64,23 +64,24 @@ def trajectory_by_genre_ui_rows(breakdown_df: pd.DataFrame) -> list[dict[str, An
     return rows
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("validation_csv", type=Path)
     parser.add_argument("--breakdown-csv", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--breakdown-output", type=Path, default=None)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     validation_df = pd.read_csv(args.validation_csv)
     rows = trajectory_ui_rows(validation_df)
-    args.output.write_text(json.dumps(rows))
+    write_json(args.output, rows)
     print(f"wrote {len(rows)} rows to {args.output}")
 
     if args.breakdown_csv and args.breakdown_output:
         breakdown_df = pd.read_csv(args.breakdown_csv)
         breakdown_rows = trajectory_by_genre_ui_rows(breakdown_df)
-        args.breakdown_output.write_text(json.dumps(breakdown_rows))
+        write_json(args.breakdown_output, breakdown_rows)
         print(f"wrote {len(breakdown_rows)} by-genre rows to {args.breakdown_output}")
 
 

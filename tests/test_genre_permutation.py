@@ -18,7 +18,9 @@ def test_raises_a_clear_error_instead_of_crashing_when_only_one_psalm_survives_f
     genre_codes = np.array([0])
 
     with pytest.raises(ValueError, match="at least 2 psalms"):
-        joint_psalm_label_permutation_test(similarity_matrix, genre_codes, ("A",))
+        joint_psalm_label_permutation_test(
+            similarity_matrix, genre_codes, ("A",), rng=np.random.default_rng(0)
+        )
 
 
 def test_one_vs_rest_masks_matches_touches_genre_semantics() -> None:
@@ -35,7 +37,9 @@ def test_one_vs_rest_masks_matches_touches_genre_semantics() -> None:
         [False, False, False, False],
     ]
     assert population_mask[2, 3] is np.False_ or not population_mask[2, 3]
-    assert population_mask[0, 2] and population_mask[0, 3] and population_mask[1, 2]
+    assert population_mask[0, 2]
+    assert population_mask[0, 3]
+    assert population_mask[1, 2]
 
 
 def _strong_signal_fixture() -> tuple[np.ndarray, np.ndarray, tuple[str, ...]]:
@@ -106,7 +110,7 @@ def test_permutation_p_is_small_for_a_genre_with_strong_real_separation() -> Non
     )
 
     assert all(p < 0.05 for p in result.p_perm)
-    assert all(p < 0.05 for p in result.p_maxT)
+    assert all(p < 0.05 for p in result.p_maxt)
 
 
 def test_permutation_p_is_large_when_labels_are_unrelated_to_similarity() -> None:
@@ -125,8 +129,7 @@ def test_permutation_p_is_large_when_labels_are_unrelated_to_similarity() -> Non
         similarity_matrix, codes, genres, n_permutations=500, rng=np.random.default_rng(2)
     )
 
-    # A single random draw over 3 genres can produce one ~5% false positive by chance; the
-    # median across genres should still land solidly in the non-significant range.
+    # One genre can draw a ~5% false positive by chance, so the median should stay non-significant.
     assert float(np.median(result.p_perm)) > 0.05
 
 
@@ -155,7 +158,7 @@ def test_permutation_p_is_large_for_a_genre_separated_in_the_wrong_direction() -
         base, codes, genres, n_permutations=500, rng=np.random.default_rng(10)
     )
 
-    assert result.auc_observed[0] < 0.5
+    assert result.observed[0] < 0.5
     assert result.p_perm[0] > 0.5
 
 
@@ -166,7 +169,7 @@ def test_maxt_p_values_never_smaller_than_per_genre_p_perm() -> None:
         similarity_matrix, codes, genres, n_permutations=300, rng=np.random.default_rng(3)
     )
 
-    for p_perm, p_maxt in zip(result.p_perm, result.p_maxT, strict=True):
+    for p_perm, p_maxt in zip(result.p_perm, result.p_maxt, strict=True):
         assert p_maxt >= p_perm
 
 
@@ -178,7 +181,7 @@ def test_p_values_are_never_exactly_zero() -> None:
     )
 
     assert all(p > 0.0 for p in result.p_perm)
-    assert all(p > 0.0 for p in result.p_maxT)
+    assert all(p > 0.0 for p in result.p_maxt)
 
 
 def test_same_seed_reproduces_identical_results() -> None:
@@ -192,7 +195,7 @@ def test_same_seed_reproduces_identical_results() -> None:
     )
 
     assert result_a.p_perm == result_b.p_perm
-    assert result_a.p_maxT == result_b.p_maxT
+    assert result_a.p_maxt == result_b.p_maxt
 
 
 def test_observed_auc_matches_scipy_mannwhitneyu_on_the_real_labels() -> None:
@@ -212,4 +215,60 @@ def test_observed_auc_matches_scipy_mannwhitneyu_on_the_real_labels() -> None:
         similarity_matrix, codes, genres, n_permutations=10, rng=np.random.default_rng(5)
     )
 
-    assert result.auc_observed[0] == expected_auc
+    assert result.observed[0] == expected_auc
+
+
+def test_batched_separation_chunks_draws_without_changing_a_single_bit() -> None:
+    """Draws are independent, so chunking them must be exact, not merely close."""
+    from genre.permutation import _batched_separation
+    from library.blocking import rows_per_block
+
+    rng = np.random.default_rng(3)
+    n_psalms = 40
+    rows_pairs = n_psalms * (n_psalms - 1) // 2
+    n_draws = rows_per_block(rows_pairs) * 3 + 7
+    rows, cols = np.triu_indices(n_psalms, k=1)
+    sims = rng.random(len(rows))
+    is_target_batch = rng.random((n_draws, n_psalms)) < 0.4
+
+    chunked = _batched_separation(sims, rows, cols, is_target_batch)
+    one_shot = np.concatenate(
+        [_batched_separation(sims, rows, cols, is_target_batch[i : i + 1]) for i in range(n_draws)]
+    )
+
+    assert np.array_equal(chunked, one_shot)
+
+
+def test_batched_separation_peak_memory_does_not_grow_with_the_draw_count() -> None:
+    """All draws at once allocated two float64 arrays of draws by pairs."""
+    import tracemalloc
+
+    from genre.permutation import _batched_separation
+
+    rng = np.random.default_rng(4)
+    n_psalms = 60
+    rows, cols = np.triu_indices(n_psalms, k=1)
+    sims = rng.random(len(rows))
+
+    def peak_for(n_draws: int) -> int:
+        batch = rng.random((n_draws, n_psalms)) < 0.4
+        tracemalloc.start()
+        _batched_separation(sims, rows, cols, batch)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return peak
+
+    small, large = peak_for(200), peak_for(2000)
+
+    assert large < small * 3, f"peak grew from {small} to {large} with ten times the draws"
+
+
+def test_one_vs_rest_auc_is_nan_when_a_genre_has_no_pair_on_one_side() -> None:
+    """A genre with no same-genre or no different-genre pair cannot be ranked, so it reports NaN."""
+    from genre.permutation import _one_vs_rest_auc
+
+    sims = np.array([0.1, 0.2, 0.3])
+    all_same = np.array([True, True, True])
+    population = np.array([True, True, True])
+
+    assert np.isnan(_one_vs_rest_auc(sims, all_same, population))

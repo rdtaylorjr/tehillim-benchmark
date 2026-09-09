@@ -38,7 +38,7 @@ def test_build_ui_page_html_fills_in_every_domain_missing_from_the_input() -> No
     data = json.loads(html[start:end])
 
     assert set(data["domains"]) == set(ALL_DOMAIN_IDS)
-    assert data["domains"]["phonology"] == {
+    assert data["domains"]["phonological"] == {
         "parallelism_overall": [],
         "parallelism_by_type": [],
         "genre_overall": [],

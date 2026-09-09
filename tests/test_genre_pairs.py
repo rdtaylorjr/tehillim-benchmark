@@ -34,7 +34,7 @@ def test_produces_no_pairs_for_a_single_psalm() -> None:
 
 
 def test_produces_the_correct_total_pair_count_for_n_psalms() -> None:
-    genre_by_psalm = {i: "Lament" for i in range(10)}
+    genre_by_psalm = dict.fromkeys(range(10), "Lament")
 
     pairs = build_genre_pairs(genre_by_psalm)
 

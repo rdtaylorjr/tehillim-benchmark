@@ -1,47 +1,69 @@
-from genre.bootstrap import GenreBootstrapCI
-from genre.scripts.compute_bootstrap_cis import _row
+from functools import partial
+from pathlib import Path
+
+import pytest
+
+from genre.scripts.compute_bootstrap_cis import score_model
+from library.errors import BenchmarkDataError
+from library.scoring import skipping_unscorable
+
+_GENRE_BY_PSALM = {1: "A", 2: "A", 3: "A", 4: "B", 5: "B", 6: "B"}
+_HALF_VERSES_BY_PSALM = {psalm: [psalm] for psalm in _GENRE_BY_PSALM}
+_SEPARABLE = {
+    1: [1.0, 0.0],
+    2: [0.95, 0.05],
+    3: [0.9, 0.1],
+    4: [0.0, 1.0],
+    5: [0.05, 0.95],
+    6: [0.1, 0.9],
+}
 
 
-def _result(**overrides: float | int) -> GenreBootstrapCI:
-    defaults: dict[str, float | int] = {
-        "point_ap": 0.8,
-        "ap_ci_low": 0.7,
-        "ap_ci_high": 0.9,
-        "ap_ci_low_pct": 0.71,
-        "ap_ci_high_pct": 0.89,
-        "point_gap": 0.3,
-        "gap_ci_low": 0.2,
-        "gap_ci_high": 0.4,
-        "gap_ci_low_pct": 0.21,
-        "gap_ci_high_pct": 0.39,
-        "point_auc": 0.75,
-        "auc_ci_low": 0.65,
-        "auc_ci_high": 0.85,
-        "auc_ci_low_pct": 0.66,
-        "auc_ci_high_pct": 0.84,
-        "prevalence": 0.14,
-        "n_valid_resamples": 950,
-        "n_valid_jackknife": 149,
-    }
-    defaults.update(overrides)
-    return GenreBootstrapCI(**defaults)  # type: ignore[arg-type]
+def test_score_model_names_the_row_after_the_files_dataset_identifier(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    path = write_embeddings_parquet(tmp_path / "domain=d" / "model=mine" / "v.parquet", _SEPARABLE)
+
+    row = score_model(path, _HALF_VERSES_BY_PSALM, _GENRE_BY_PSALM, n_resamples=50, seed=0)
+
+    assert row is not None
+    assert row["model"] == "mine"
+    assert row["ap_ci_low"] <= row["point_ap"] <= row["ap_ci_high"]
 
 
-class TestRow:
-    def test_carries_the_model_name_alongside_every_result_field(self) -> None:
-        row = _row("bge_m3", _result())
+def test_score_model_raises_when_the_population_cannot_support_a_ci(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """Two psalms of different genres leave zero same-genre pairs, so AP and AUC are undefined."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=tiny" / "v.parquet", {1: [1.0, 0.0], 2: [0.0, 1.0]}
+    )
 
-        assert row["model"] == "bge_m3"
-        assert row["point_ap"] == 0.8
-        assert row["ap_ci_low"] == 0.7
-        assert row["ap_ci_high"] == 0.9
-        assert row["point_auc"] == 0.75
-        assert row["prevalence"] == 0.14
-        assert row["n_valid_resamples"] == 950
-        assert row["n_valid_jackknife"] == 149
+    with pytest.raises(BenchmarkDataError):
+        score_model(path, {1: [1], 2: [2]}, {1: "A", 2: "B"}, n_resamples=20, seed=0)
 
-    def test_flattens_every_field_the_result_dataclass_carries(self) -> None:
-        row = _row("bge_m3", _result())
 
-        # "model" plus all 18 GenreBootstrapCI fields.
-        assert len(row) == 19
+def test_score_model_raises_when_only_one_psalm_vector_survives(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """A background needs two vectors, and one syntactic model leaves only one."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=lonely" / "v.parquet", {1: [1.0, 0.0]}
+    )
+
+    with pytest.raises(BenchmarkDataError):
+        score_model(path, {1: [1]}, {1: "A"}, n_resamples=20, seed=0)
+
+
+def test_the_shared_policy_turns_that_raise_into_a_skip(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """The scorer computes or raises; deciding to skip belongs to one shared policy."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=lonely" / "v.parquet", {1: [1.0, 0.0]}
+    )
+    score = partial(
+        score_model, half_verses_by_psalm={1: [1]}, genre_by_psalm={1: "A"}, n_resamples=20, seed=0
+    )
+
+    assert skipping_unscorable(score)(path) is None

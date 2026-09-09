@@ -1,30 +1,33 @@
-"""Order-shuffle-null control: does colon order carry more genre signal than a shuffled null."""
+"""Order-shuffle null: does half-verse order carry more genre signal than a shuffled null."""
 
 import argparse
 import csv
-import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from genre.evaluate import evaluate_genre_discrimination
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs, filter_pairs_by_genre
-from library.bhsa import DEFAULT_CHECKOUT, list_psalms_cola_by_psalm, load_bhsa_api
-from library.centroid import psalm_centroids
-from library.embeddings import load_embeddings
-from library.order_shuffle import DEFAULT_N_SHUFFLES, order_shuffle_result
+from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from library.cli import add_genre_csv_argument, add_scoring_arguments
+from library.order_shuffle import order_shuffle_result
+from library.psalm_vectors import load_psalm_vectors
+from library.shuffle_draws import select_shuffle_draws
+from library.worker_pool import map_in_order
 
 
 def score_genre_ap(
     path: Path,
-    cola_by_psalm: dict[int, list[int]],
+    half_verses_by_psalm: dict[int, list[int]],
     pairs: list[GenrePair],
     genres: list[str],
 ) -> dict[str, float]:
     """Per-genre Average Precision (no permutation testing) for one embeddings file."""
-    node_vectors = load_embeddings(path)
-    vectors = psalm_centroids(cola_by_psalm, node_vectors)
+    vectors = load_psalm_vectors(path, half_verses_by_psalm)
     return {
         genre: evaluate_genre_discrimination(
             filter_pairs_by_genre(pairs, genre), vectors
@@ -33,40 +36,49 @@ def score_genre_ap(
     }
 
 
-def main() -> None:
+def shuffled_scores_by_genre(
+    scores_by_file: list[dict[str, float]], genres: list[str]
+) -> dict[str, np.ndarray]:
+    """Transposes per-file genre scores into one null array per genre, keeping file order."""
+    return {
+        genre: np.array([scores[genre] for scores in scores_by_file], dtype=float)
+        for genre in genres
+    }
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_factory: Callable[[str], Any] = load_bhsa_api,
+) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "genre_csv",
-        type=Path,
-        help="third-party genre CSV, e.g. psalms-browser.csv (not in this repo)",
-    )
+    add_genre_csv_argument(parser)
     parser.add_argument("real_embeddings", type=Path)
     parser.add_argument("shuffled_embeddings_dir", type=Path)
-    parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
-    parser.add_argument("--n-shuffles", type=int, default=DEFAULT_N_SHUFFLES)
-    parser.add_argument("--output", type=Path, default=None)
-    args = parser.parse_args()
+    add_scoring_arguments(parser, with_shuffles=True)
+    args = parser.parse_args(argv)
 
-    api = load_bhsa_api(args.checkout)
-    cola_by_psalm = list_psalms_cola_by_psalm(api)
+    api = api_factory(args.checkout)
+    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
     genre_by_psalm = load_genre_by_psalm(args.genre_csv)
     pairs = build_genre_pairs(genre_by_psalm)
     genres = sorted(set(genre_by_psalm.values()))
 
-    real_ap = score_genre_ap(args.real_embeddings, cola_by_psalm, pairs, genres)
-    shuffled_paths = sorted(args.shuffled_embeddings_dir.glob("**/*.parquet"))[: args.n_shuffles]
-    shuffled_ap: dict[str, list[float]] = {genre: [] for genre in genres}
-    for path in shuffled_paths:
-        print(f"scoring {path.parent.name}", file=sys.stderr)
-        scores = score_genre_ap(path, cola_by_psalm, pairs, genres)
-        for genre in genres:
-            shuffled_ap[genre].append(scores[genre])
+    real_ap = score_genre_ap(args.real_embeddings, half_verses_by_psalm, pairs, genres)
+    shuffled_paths = select_shuffle_draws(args.shuffled_embeddings_dir, args.n_shuffles)
+    score = partial(
+        score_genre_ap, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs, genres=genres
+    )
+    shuffled_ap = shuffled_scores_by_genre(
+        map_in_order(score, shuffled_paths, args.workers), genres
+    )
 
     rows = []
     for genre in genres:
         result = order_shuffle_result(
             real_score=real_ap[genre],
-            shuffled_scores=np.array(shuffled_ap[genre]),
+            shuffled_scores=shuffled_ap[genre],
             n_hypotheses=len(genres),
         )
         rows.append(
@@ -85,7 +97,7 @@ def main() -> None:
         )
 
     if args.output:
-        with open(args.output, "w", newline="") as handle:
+        with args.output.open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)

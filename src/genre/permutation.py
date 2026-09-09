@@ -1,19 +1,18 @@
 """Psalm-label permutation test for one-vs-rest genre AUC, jointly across genres (maxT)."""
 
-from dataclasses import dataclass
-
 import numpy as np
 
+from library.blocking import row_blocks, rows_per_block
+from library.errors import InsufficientDataError
 from library.fast_metrics import fast_auc
+from library.permutation_test import (
+    GroupPermutationResult,
+    maxt_p_values,
+    permuted_label_batches,
+)
+from library.protocol import DEFAULT_N_GROUP_PERMUTATIONS
 
-
-@dataclass(frozen=True, slots=True)
-class GenrePermutationResult:
-    genres: tuple[str, ...]
-    auc_observed: tuple[float, ...]
-    p_perm: tuple[float, ...]
-    p_maxT: tuple[float, ...]  # noqa: N815 -- Westfall-Young (1993) maxT, matches the CSV/JSON field name
-    n_permutations: int
+_MIN_PSALMS_FOR_PERMUTATION = 2
 
 
 def one_vs_rest_masks(genre_codes: np.ndarray, genre_index: int) -> tuple[np.ndarray, np.ndarray]:
@@ -38,13 +37,16 @@ def _one_vs_rest_auc(sims: np.ndarray, same: np.ndarray, population: np.ndarray)
 def _batched_separation(
     sims: np.ndarray, rows: np.ndarray, cols: np.ndarray, is_target_batch: np.ndarray
 ) -> np.ndarray:
-    """Batched one-vs-rest (AUC - 0.5) for many permutation draws at once, ties handled exactly.
-
-    is_target_batch: (B, n) boolean, whether each psalm carries the target genre in that draw.
-    Uses the Mann-Whitney U tie-average-rank identity (Hanley & McNeil 1982), with `sims`'
-    fixed sort computed once and reused across all B draws via cumulative population counts per
-    tie-group, instead of calling fast_auc/rankdata separately for each draw.
-    """
+    """Batched one-vs-rest (AUC - 0.5) for many draws at once, over one fixed sort of sims."""
+    #: Draws are independent, so chunking is exact and caps two draws-by-pairs float64 arrays.
+    n_pairs_total = len(rows)
+    if len(is_target_batch) > rows_per_block(n_pairs_total):
+        return np.concatenate(
+            [
+                _batched_separation(sims, rows, cols, is_target_batch[span])
+                for span in row_blocks(len(is_target_batch), n_pairs_total)
+            ]
+        )
     n_pairs = sims.shape[0]
     same_batch = is_target_batch[:, rows] & is_target_batch[:, cols]
     population_batch = is_target_batch[:, rows] | is_target_batch[:, cols]
@@ -60,9 +62,7 @@ def _batched_separation(
     same_sorted = same_batch[:, order]
     population_sorted = population_batch[:, order].astype(np.float64)
 
-    # Cumulative population count in sorted order, per permutation draw (fully vectorized: one
-    # cumsum per row, then plain fancy indexing to each position's own tie-group boundary,
-    # avoiding a per-(batch, group) scatter-add, which numpy's np.add.at cannot do at this scale).
+    # One cumsum per draw, then fancy indexing to each position's tie-group boundary.
     cum_pop_sorted = np.cumsum(population_sorted, axis=1)
     count_le = cum_pop_sorted[:, group_end_idx]
     start_before = np.clip(group_start_idx - 1, 0, None)
@@ -85,21 +85,17 @@ def joint_psalm_label_permutation_test(
     similarity_matrix: np.ndarray,
     genre_codes: np.ndarray,
     genres: tuple[str, ...],
-    n_permutations: int = 2000,
-    rng: np.random.Generator | None = None,
-) -> GenrePermutationResult:
-    """One-sided permutation p per genre's one-vs-rest AUC, plus a Westfall-Young (1993) maxT.
-
-    Permutes the whole per-psalm genre-code assignment so every genre's null draw comes from the
-    same permutation, which is what makes the joint maxT correction valid. The one-vs-rest
-    population (which pairs count at all) depends on the labels being permuted, so the standard
-    fixed-population rank-sum vectorization trick doesn't apply here; each permutation's AUC is
-    computed via the already-verified `fast_auc`, one call per genre per permutation.
-    """
-    rng = rng if rng is not None else np.random.default_rng()
+    n_permutations: int = DEFAULT_N_GROUP_PERMUTATIONS,
+    *,
+    rng: np.random.Generator,
+) -> GroupPermutationResult:
+    """One-sided permutation p per genre's one-vs-rest AUC, plus a Westfall-Young (1993) maxT."""
     n = similarity_matrix.shape[0]
-    if n < 2:
-        raise ValueError(f"need at least 2 psalms for a one-vs-rest permutation test, got {n}")
+    if n < _MIN_PSALMS_FOR_PERMUTATION:
+        raise InsufficientDataError(
+            f"a one-vs-rest permutation test needs at least "
+            f"{_MIN_PSALMS_FOR_PERMUTATION} psalms, got {n}"
+        )
     rows, cols = np.triu_indices(n, k=1)
     sims = similarity_matrix[rows, cols]
     n_genres = len(genres)
@@ -108,37 +104,19 @@ def joint_psalm_label_permutation_test(
     for g in range(n_genres):
         same_mask, population_mask = one_vs_rest_masks(genre_codes, g)
         auc_observed[g] = _one_vs_rest_auc(sims, same_mask[rows, cols], population_mask[rows, cols])
-    # Signed, matching evaluate.py's alternative="greater": tests same-genre > different-genre
-    # only. An unsigned |AUC-0.5| would also flag genres separated in the OPPOSITE direction
-    # (same-genre pairs less similar than cross-genre pairs), which is a different finding.
+    # Signed, not |AUC-0.5|, so a genre separated in the opposite direction is not flagged.
     separation_observed = auc_observed - 0.5
 
-    tiled_codes = np.tile(genre_codes, (n_permutations, 1))
-    permuted_codes = rng.permuted(tiled_codes, axis=1)
-
+    permuted_codes = permuted_label_batches(genre_codes, n_permutations, rng)
     null_separation = np.full((n_permutations, n_genres), np.nan)
     for g in range(n_genres):
-        is_target_batch = permuted_codes == g
-        null_separation[:, g] = _batched_separation(sims, rows, cols, is_target_batch)
+        null_separation[:, g] = _batched_separation(sims, rows, cols, permuted_codes == g)
+    permutation = maxt_p_values(separation_observed, null_separation)
 
-    max_null_separation = np.nanmax(null_separation, axis=1)
-
-    p_perm = np.full(n_genres, np.nan)
-    p_maxT = np.full(n_genres, np.nan)  # noqa: N806 -- Westfall-Young maxT term
-    for g in range(n_genres):
-        valid = ~np.isnan(null_separation[:, g])
-        p_perm[g] = (np.sum(null_separation[valid, g] >= separation_observed[g]) + 1) / (
-            int(np.sum(valid)) + 1
-        )
-        valid_max = ~np.isnan(max_null_separation)
-        p_maxT[g] = (np.sum(max_null_separation[valid_max] >= separation_observed[g]) + 1) / (
-            int(np.sum(valid_max)) + 1
-        )
-
-    return GenrePermutationResult(
+    return GroupPermutationResult(
         genres=genres,
-        auc_observed=tuple(auc_observed.tolist()),
-        p_perm=tuple(p_perm.tolist()),
-        p_maxT=tuple(p_maxT.tolist()),
+        observed=tuple(auc_observed.tolist()),
+        p_perm=tuple(permutation.p_per_group.tolist()),
+        p_maxt=tuple(permutation.p_maxt.tolist()),
         n_permutations=n_permutations,
     )

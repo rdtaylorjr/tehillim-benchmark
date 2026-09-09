@@ -1,4 +1,4 @@
-"""Discrete-curve geometry of a psalm's cola sequence: step direction, size, and turning."""
+"""Discrete-curve geometry of a psalm's half-verses sequence: step direction, size, and turning."""
 
 import numpy as np
 
@@ -6,12 +6,12 @@ from library.retrieval_metrics import paired_cosine_similarity
 
 
 def adjacent_similarity(sequence: np.ndarray) -> np.ndarray:
-    """Cosine similarity between each cola and the next, length n-1."""
+    """Cosine similarity between each half-verses and the next, length n-1."""
     return paired_cosine_similarity(sequence[:-1], sequence[1:])
 
 
 def step_magnitude(sequence: np.ndarray) -> np.ndarray:
-    """Euclidean displacement between each cola and the next, length n-1."""
+    """Euclidean displacement between each half-verses and the next, length n-1."""
     return np.asarray(np.linalg.norm(sequence[1:] - sequence[:-1], axis=1))
 
 

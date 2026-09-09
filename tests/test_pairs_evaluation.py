@@ -56,7 +56,7 @@ def test_build_retrieval_pairs_does_not_cross_repeated_couplet_boundaries() -> N
 
 
 def test_build_retrieval_pairs_uses_overlapping_adjacent_pairs_within_one_strophe() -> None:
-    """A true tricolon (no dash) is one connected unit: A-B and B-C both count."""
+    """A dashless three-slot segment is one connected unit: A-B and B-C both count."""
     groups = [_group("ABC", (0, 1, 2), ("A", "B", "C"), ((1,), (2,), (3,)))]
 
     pairs = build_retrieval_pairs(groups)
@@ -77,9 +77,7 @@ def test_build_retrieval_pairs_drops_a_lone_single_member_segment() -> None:
 def test_build_retrieval_pairs_drops_a_pair_with_a_slot_missing_from_the_reconstructed_group() -> (
     None
 ):
-    """A slot absent entirely (never resolved during alignment, so never written to the .tf
-    files) must not silently pair its neighbor with something else.
-    """
+    """A slot never resolved during alignment must drop its pair rather than half-build it."""
     groups = [_group("AB", (0,), ("A",), ((100,),))]
 
     pairs = build_retrieval_pairs(groups)
@@ -104,7 +102,7 @@ def test_build_retrieval_pairs_drops_a_pair_flagged_ambiguous() -> None:
 
 
 def test_build_retrieval_pairs_drops_a_pair_whose_members_share_one_node() -> None:
-    """A resumptive member repeating within the same colon isn't a meaningful pair."""
+    """A resumptive member repeating within the same half-verse isn't a meaningful pair."""
     groups = [_group("AB", (0, 1), ("A", "B"), ((100,), (100,)))]
 
     pairs = build_retrieval_pairs(groups)
@@ -113,10 +111,7 @@ def test_build_retrieval_pairs_drops_a_pair_whose_members_share_one_node() -> No
 
 
 def test_build_retrieval_pairs_matches_by_letter_identity_in_a_chiasm() -> None:
-    """Ps 140:4, signature AB-BA: A='sharpen tongue', B='like a serpent', B='venom of an asp',
-    A='under their lips'. The real relationships are A-A' (outer frame) and B-B' (the two snake
-    images), not adjacent B-A' as blind positional pairing within 'BA' would produce.
-    """
+    """Ps 140:4, signature AB-BA: A='sharpen tongue', B='like a serpent', B='venom of an asp'."""
     groups = [
         _group(
             "AB-BA",

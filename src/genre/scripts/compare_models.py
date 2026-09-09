@@ -1,77 +1,82 @@
 """Runs evaluate_genre_discrimination across every embedding file in a directory."""
 
 import argparse
-import csv
-import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import cast
-
-import numpy as np
+from typing import Any, cast
 
 from genre.evaluate import evaluate_genre_discrimination
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs
-from library.bhsa import DEFAULT_CHECKOUT, list_psalms_cola_by_psalm, load_bhsa_api
-from library.centroid import psalm_centroids
-from library.embeddings import dataset_identifier, load_embeddings
-from library.incremental_cache import load_cached_rows
+from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from library.cli import (
+    add_embeddings_dir_argument,
+    add_genre_csv_argument,
+    add_scoring_arguments,
+    resume_from_cache,
+)
+from library.embeddings import dataset_identifier
+from library.psalm_vectors import load_psalm_vectors
+from library.rows_output import write_rows_csv
+from library.scoring import skipping_unscorable
+from library.worker_pool import map_in_order
+
+
+def score_model(
+    path: Path, half_verses_by_psalm: dict[int, list[int]], pairs: list[GenrePair]
+) -> dict[str, str | int | float]:
+    """One model file's genre-discrimination row, scored independently of every other model."""
+    psalm_vectors = load_psalm_vectors(path, half_verses_by_psalm)
+    report = evaluate_genre_discrimination(pairs, psalm_vectors)
+    return {
+        "model": dataset_identifier(path),
+        "n_same_genre": report.n_same_genre,
+        "n_different_genre": report.n_different_genre,
+        "prevalence": report.prevalence,
+        "average_precision": report.average_precision,
+        "separation_auc": report.separation_auc,
+        "separation_p": report.separation_p,
+    }
 
 
 def compare_genre_models(
-    pairs: list[GenrePair], psalm_vectors_by_model: dict[str, dict[int, np.ndarray]]
+    pairs: list[GenrePair],
+    model_paths: list[Path],
+    half_verses_by_psalm: dict[int, list[int]],
+    max_workers: int | None = None,
 ) -> list[dict[str, str | int | float]]:
-    """Evaluates every model's psalm centroids against the same genre pairs, sorted by AP."""
-    rows: list[dict[str, str | int | float]] = []
-    for model, psalm_vectors in psalm_vectors_by_model.items():
-        report = evaluate_genre_discrimination(pairs, psalm_vectors)
-        rows.append(
-            {
-                "model": model,
-                "n_same_genre": report.n_same_genre,
-                "n_different_genre": report.n_different_genre,
-                "prevalence": report.prevalence,
-                "average_precision": report.average_precision,
-                "separation_auc": report.separation_auc,
-                "separation_p": report.separation_p,
-            }
-        )
-    rows.sort(key=lambda r: cast(float, r["average_precision"]), reverse=True)
+    """Scores every model file across workers, rows sorted by Average Precision descending."""
+    score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs)
+    scored = map_in_order(skipping_unscorable(score), model_paths, max_workers)
+    rows = [row for row in scored if row is not None]
+    rows.sort(key=lambda r: cast("float", r["average_precision"]), reverse=True)
     return rows
 
 
-def main() -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_factory: Callable[[str], Any] = load_bhsa_api,
+) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "genre_csv",
-        type=Path,
-        help="third-party genre CSV, e.g. psalms-browser.csv (not in this repo)",
-    )
-    parser.add_argument("embeddings_dir", type=Path)
-    parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
-    parser.add_argument("--output", type=Path, default=None)
-    args = parser.parse_args()
+    add_genre_csv_argument(parser)
+    add_embeddings_dir_argument(parser)
+    add_scoring_arguments(parser)
+    args = parser.parse_args(argv)
 
-    api = load_bhsa_api(args.checkout)
+    api = api_factory(args.checkout)
     genre_by_psalm = load_genre_by_psalm(args.genre_csv)
     pairs = build_genre_pairs(genre_by_psalm)
-    cola_by_psalm = list_psalms_cola_by_psalm(api)
+    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
 
-    cached_rows, cached_models = load_cached_rows(args.output) if args.output else ([], set())
-    if cached_models:
-        print(f"reusing {len(cached_models)} cached models from {args.output}", file=sys.stderr)
-
-    model_paths = sorted(p for p in args.embeddings_dir.glob("**/*.parquet") if p.is_file())
-    psalm_vectors_by_model = {}
-    for path in model_paths:
-        model = dataset_identifier(path)
-        if model in cached_models:
-            continue
-        node_vectors = load_embeddings(path)
-        psalm_vectors_by_model[model] = psalm_centroids(cola_by_psalm, node_vectors)
-
-    new_rows = compare_genre_models(pairs, psalm_vectors_by_model)
+    cached_rows, model_paths = resume_from_cache(args.embeddings_dir, args.output)
+    new_rows = compare_genre_models(
+        pairs, model_paths, half_verses_by_psalm, max_workers=args.workers
+    )
     rows = sorted(
-        cached_rows + new_rows, key=lambda r: cast(float, r["average_precision"]), reverse=True
+        cached_rows + new_rows, key=lambda r: cast("float", r["average_precision"]), reverse=True
     )
 
     for row in rows:
@@ -81,11 +86,7 @@ def main() -> None:
         )
 
     if args.output:
-        fieldnames = list(dict.fromkeys(key for row in rows for key in row))
-        with open(args.output, "w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
+        write_rows_csv(args.output, rows)
 
 
 if __name__ == "__main__":

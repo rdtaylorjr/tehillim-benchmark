@@ -2,16 +2,16 @@ import numpy as np
 import pandas as pd
 
 from ui_export.detail import (
+    auc_ap_ci_for,
     build_genre_detail,
     build_parallelism_detail,
     build_trajectory_detail,
     genre_mean_matrix,
     heatmap_cells,
-    load_auc_ap_ci,
-    load_validated_gap_stats,
     order_psalms_by_own_stat,
     raincloud_group,
     roc_pr_series,
+    validated_gap_stats_for,
 )
 
 
@@ -105,7 +105,7 @@ def test_load_auc_ap_ci_reads_the_matching_model_and_scope_row() -> None:
             },
         ]
     )
-    stats = load_auc_ap_ci(df, "m1", scope="overall")
+    stats = auc_ap_ci_for(df, "m1", scope="overall")
     assert stats == {
         "auc": 0.7,
         "auc_ci_low": 0.6,
@@ -130,7 +130,7 @@ def test_load_auc_ap_ci_returns_none_when_the_model_has_no_row() -> None:
             }
         ]
     )
-    assert load_auc_ap_ci(df, "m1", scope=None) is None
+    assert auc_ap_ci_for(df, "m1", scope=None) is None
 
 
 def test_load_validated_gap_stats_reads_both_controlled_sources() -> None:
@@ -148,7 +148,7 @@ def test_load_validated_gap_stats_reads_both_controlled_sources() -> None:
             }
         ]
     )
-    stats = load_validated_gap_stats(df, "m1", "structural_distance")
+    stats = validated_gap_stats_for(df, "m1", "structural_distance")
     assert stats == {
         "length_controlled": {"gap": 0.1, "p": 0.02, "effect_size": 0.5},
         "length_and_content_controlled": {"gap": 0.05, "p": 0.1, "effect_size": 0.2},
@@ -170,7 +170,7 @@ def test_load_validated_gap_stats_returns_none_when_the_model_metric_is_missing(
             }
         ]
     )
-    assert load_validated_gap_stats(df, "m1", "structural_distance") is None
+    assert validated_gap_stats_for(df, "m1", "structural_distance") is None
 
 
 def _pair_detail_df() -> pd.DataFrame:

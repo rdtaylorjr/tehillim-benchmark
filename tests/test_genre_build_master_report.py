@@ -83,3 +83,38 @@ def test_build_long_metrics_adds_fdr_q_values_only_for_separation_p() -> None:
     non_p_rows = long_df[long_df["metric"].isin(["average_precision", "separation_auc"])]
     assert non_p_rows["q_value"].isna().all()
     assert non_p_rows["q_value_by"].isna().all()
+
+
+def test_the_summary_contract_matches_what_the_producer_writes() -> None:
+    """A mismatch here failed every master report at run time, after hours of scoring."""
+    from genre.calibrated import GenreCalibratedComparison, genre_calibrated_row
+    from genre.scripts.build_master_report import _SUMMARY_METRICS
+
+    result = GenreCalibratedComparison(
+        n_same_genre=1,
+        n_different_genre=1,
+        prevalence=0.5,
+        mean_same_genre_similarity=0.0,
+        mean_different_genre_similarity=0.0,
+        same_genre_effect_size=0.0,
+        different_genre_effect_size=0.0,
+        average_precision=0.0,
+        separation_auc=0.0,
+        separation_p=1.0,
+    )
+
+    produced = set(genre_calibrated_row("m", result))
+
+    assert set(_SUMMARY_METRICS) <= produced
+
+
+def test_the_bootstrap_contract_matches_what_the_producer_writes() -> None:
+    from genre.scripts.build_master_report import _BOOTSTRAP_METRICS
+    from genre.scripts.compute_bootstrap_cis import ci_row
+    from library.ap_gap_auc_bootstrap import ApGapAucCI
+
+    ci = ApGapAucCI(
+        **{k: (0 if k.startswith("n_") else 0.0) for k in ApGapAucCI.__dataclass_fields__}
+    )
+
+    assert set(_BOOTSTRAP_METRICS) <= set(ci_row("m", ci))

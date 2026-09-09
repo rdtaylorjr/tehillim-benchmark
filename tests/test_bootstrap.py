@@ -3,11 +3,11 @@ import pytest
 
 from library.calibration import BackgroundStats
 from parallelism.bootstrap import (
-    _jackknife_ap_gap_and_auc,
+    _leave_one_psalm_out_splits,
     _psalm_indices,
     block_bootstrap_ap_gap_and_auc,
 )
-from parallelism.scripts.compare_baseline import as_node_pairs
+from parallelism.node_pairs import as_node_pairs
 
 
 def test_block_bootstrap_gap_and_auc_ci_contains_the_point_estimate() -> None:
@@ -109,8 +109,8 @@ def test_block_bootstrap_resamples_whole_psalms_not_individual_pairs() -> None:
     assert result.gap_ci_low == pytest.approx(result.gap_ci_high, abs=1e-9)
 
 
-def test_block_bootstrap_returns_nan_ci_when_every_resample_is_too_small_to_test() -> None:
-    """A single baseline pair never reaches n>=2, so every resample is skipped without crashing."""
+def test_block_bootstrap_rejects_a_baseline_too_small_to_score() -> None:
+    """A single baseline pair leaves AP and AUC undefined, which must fail loudly."""
     true_pairs = as_node_pairs([(1, 2), (3, 4)])
     baseline_pairs = as_node_pairs([(5, 6)])
     node_vectors = {
@@ -123,7 +123,35 @@ def test_block_bootstrap_returns_nan_ci_when_every_resample_is_too_small_to_test
     }
     node_to_psalm = {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}
     background = BackgroundStats(mean=0.3, std=0.3, n_vectors=10)
-    rng = np.random.default_rng(0)
+
+    with pytest.raises(ValueError, match="at least 2 values on each side"):
+        block_bootstrap_ap_gap_and_auc(
+            true_pairs,
+            baseline_pairs,
+            node_vectors,
+            background,
+            node_to_psalm,
+            n_resamples=20,
+            rng=np.random.default_rng(0),
+        )
+
+
+def test_block_bootstrap_returns_nan_ci_when_no_resample_is_drawn() -> None:
+    """The point estimate still stands when the scheme yields nothing to build a CI from."""
+    true_pairs = as_node_pairs([(1, 2), (3, 4)])
+    baseline_pairs = as_node_pairs([(5, 6), (7, 8)])
+    node_vectors = {
+        1: np.array([1.0, 0.0]),
+        2: np.array([0.9, 0.1]),
+        3: np.array([1.0, 0.0]),
+        4: np.array([0.9, 0.1]),
+        5: np.array([1.0, 0.0]),
+        6: np.array([0.0, 1.0]),
+        7: np.array([1.0, 0.0]),
+        8: np.array([0.1, 0.9]),
+    }
+    node_to_psalm = dict.fromkeys(range(1, 9), 1)
+    background = BackgroundStats(mean=0.3, std=0.3, n_vectors=10)
 
     result = block_bootstrap_ap_gap_and_auc(
         true_pairs,
@@ -131,34 +159,36 @@ def test_block_bootstrap_returns_nan_ci_when_every_resample_is_too_small_to_test
         node_vectors,
         background,
         node_to_psalm,
-        n_resamples=20,
-        rng=rng,
+        n_resamples=0,
+        rng=np.random.default_rng(0),
     )
 
     assert result.n_valid_resamples == 0
+    assert not np.isnan(result.point_ap)
     assert np.isnan(result.gap_ci_low)
     assert np.isnan(result.gap_ci_high)
 
 
-def test_jackknife_ap_gap_and_auc_returns_nan_when_removing_a_psalm_leaves_too_few_pairs() -> None:
+def test_leave_one_psalm_out_drops_every_pair_belonging_to_the_removed_psalm() -> None:
+    """The jackknife unit is a whole psalm, so removing one must take all of its pairs with it."""
     true_sims = np.array([0.9, 0.8, 0.5])
     true_psalms = np.array([1, 1, 2])
     baseline_sims = np.array([0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6])
     baseline_psalms = np.array([1, 1, 2, 2, 2, 2, 2])
     psalms = np.array([1, 2])
-    true_idx_by_psalm = _psalm_indices(true_psalms, psalms)
-    baseline_idx_by_psalm = _psalm_indices(baseline_psalms, psalms)
-    background = BackgroundStats(mean=0.3, std=0.2, n_vectors=10)
 
-    aps, gaps, aucs = _jackknife_ap_gap_and_auc(
-        true_sims, true_idx_by_psalm, baseline_sims, baseline_idx_by_psalm, psalms, background
+    splits = list(
+        _leave_one_psalm_out_splits(
+            psalms,
+            true_sims,
+            _psalm_indices(true_psalms, psalms),
+            baseline_sims,
+            _psalm_indices(baseline_psalms, psalms),
+        )
     )
 
-    # removing psalm 1 leaves only 1 true pair (psalm 2's) -> NaN
-    assert np.isnan(aps[0])
-    assert np.isnan(gaps[0])
-    assert np.isnan(aucs[0])
-    # removing psalm 2 leaves 2 true + 2 baseline pairs (psalm 1's) -> a real value
-    assert not np.isnan(aps[1])
-    assert not np.isnan(gaps[1])
-    assert not np.isnan(aucs[1])
+    without_psalm_1, without_psalm_2 = splits
+    assert without_psalm_1[0].tolist() == [0.5]
+    assert without_psalm_1[1].tolist() == [0.4, 0.45, 0.5, 0.55, 0.6]
+    assert without_psalm_2[0].tolist() == [0.9, 0.8]
+    assert without_psalm_2[1].tolist() == [0.3, 0.35]

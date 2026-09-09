@@ -1,5 +1,7 @@
 import numpy as np
+import pytest
 
+from library.errors import InsufficientDataError
 from parallelism.separation import similarity_separation
 
 
@@ -57,10 +59,7 @@ def test_similarity_separation_negatives_match_a_naive_per_row_loop_at_scale() -
 
 
 def test_similarity_separation_restricts_positives_with_a_row_mask() -> None:
-    """Only rows in the mask count as positives; their off-diagonal entries still count as
-    negatives regardless of mask, matching how a type-restricted subset is scored against the
-    full candidate pool.
-    """
+    """Only masked rows count as positives, while their off-diagonal entries stay negatives."""
     sim = np.array(
         [
             [0.9, 0.1, 0.1],
@@ -74,3 +73,9 @@ def test_similarity_separation_restricts_positives_with_a_row_mask() -> None:
     assert result.n_positive == 2
     assert result.n_negative == 4
     assert result.auc == 1.0
+
+
+def test_similarity_separation_rejects_a_single_pair() -> None:
+    """One pair leaves no off-diagonal negative, so the AUC is undefined, not NaN."""
+    with pytest.raises(InsufficientDataError, match="at least 2"):
+        similarity_separation(np.array([[1.0]]))

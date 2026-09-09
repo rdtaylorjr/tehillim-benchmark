@@ -61,3 +61,23 @@ class TestLoadCachedParquetSet:
 
         assert rows_by_file == [[], []]
         assert models == set()
+
+
+def test_cached_floats_round_trip_to_the_exact_same_bits(tmp_path: Path) -> None:
+    """A cached row is rewritten verbatim, so a lossy parse would alter published numbers."""
+    value = 1.5547970191810556e-09
+    cache = tmp_path / "cache.csv"
+    cache.write_text(f"model,separation_p\nm,{value!r}\n")
+
+    rows, _models = load_cached_rows(cache)
+
+    assert rows[0]["separation_p"] == value
+
+
+def test_cached_parquet_floats_round_trip_exactly(tmp_path: Path) -> None:
+    value = 4.1377175583932606e-42
+    pd.DataFrame({"model": ["m"], "p": [value]}).to_parquet(tmp_path / "a.parquet")
+
+    (rows,), _models = load_cached_parquet_set(tmp_path, ("a.parquet",))
+
+    assert rows[0]["p"] == value

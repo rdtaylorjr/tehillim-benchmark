@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytest
 
@@ -57,7 +59,7 @@ def test_dtw_warping_path_is_monotone_and_continuous() -> None:
 
     path = dtw_warping_path(accumulated)
 
-    for (i0, j0), (i1, j1) in zip(path, path[1:], strict=False):
+    for (i0, j0), (i1, j1) in itertools.pairwise(path):
         assert i1 - i0 in (0, 1)
         assert j1 - j0 in (0, 1)
         assert (i1, j1) != (i0, j0)

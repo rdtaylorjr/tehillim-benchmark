@@ -1,6 +1,7 @@
 """Decomposes parallelism groups into retrieval pairs; a chiasm pairs by letter identity."""
 
-from collections.abc import Mapping
+import itertools
+from collections.abc import Container
 from dataclasses import dataclass
 
 from parallelism.tf_features import ReconstructedGroup
@@ -8,6 +9,8 @@ from parallelism.tf_features import ReconstructedGroup
 
 @dataclass(frozen=True, slots=True)
 class RetrievalPair:
+    """One annotated parallelism: its two half-verse spans and how they were labelled."""
+
     pair_id: str
     group_range: str
     parallelism_type: str
@@ -51,18 +54,17 @@ def _positions_for_signature(signature: str) -> list[tuple[int, int]]:
         for pos, letter in enumerate(seg_j):
             seg_j_positions.setdefault(letter, []).append(pos)
         for pos_i, letter in enumerate(seg_i):
+            #: The linker matches letters as multisets, so each occurrence has exactly one partner.
             occurrence = next_index_for_letter.get(letter, 0)
-            candidates = seg_j_positions.get(letter, [])
-            if occurrence >= len(candidates):
-                continue
             next_index_for_letter[letter] = occurrence + 1
-            position_pairs.append((offsets[i] + pos_i, offsets[j] + candidates[occurrence]))
+            partner = seg_j_positions[letter][occurrence]
+            position_pairs.append((offsets[i] + pos_i, offsets[j] + partner))
 
     for idx, segment in enumerate(segments):
         if idx in resolved:
             continue
         positions = list(range(offsets[idx], offsets[idx] + len(segment)))
-        for a, b in zip(positions, positions[1:], strict=False):
+        for a, b in itertools.pairwise(positions):
             position_pairs.append((a, b))
 
     return sorted(position_pairs)
@@ -74,7 +76,7 @@ def filter_pairs_by_type(pairs: list[RetrievalPair], types: frozenset[str]) -> l
 
 
 def filter_pairs_with_vectors(
-    pairs: list[RetrievalPair], node_vectors: Mapping[int, object]
+    pairs: list[RetrievalPair], node_vectors: Container[int]
 ) -> list[RetrievalPair]:
     """Retrieval pairs whose source and target nodes are all present in node_vectors."""
     return [

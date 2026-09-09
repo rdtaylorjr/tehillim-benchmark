@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from library.embeddings import split_model_name
-from library.multiple_comparisons import add_fdr_q_values
+from library.master_report import finalise_long_metrics, melt_to_long, pivot_metrics_wide
+from library.rows_output import write_dataframe_parquet
+from library.tie_diagnostics import tie_fractions_by_model
 
 _SUMMARY_METRICS = [
     "n_same_genre",
@@ -40,71 +41,43 @@ _BOOTSTRAP_METRICS = [
 ]
 
 
-def _melt_wide(df: pd.DataFrame, metrics: list[str], source: str) -> pd.DataFrame:
-    long = df.melt(id_vars=["model"], value_vars=metrics, var_name="metric", value_name="value")
-    long["scope"] = "overall"
-    long["scope_kind"] = "overall"
-    long["source"] = source
-    return long
-
-
-def build_long_metrics(summary_df: pd.DataFrame, bootstrap_df: pd.DataFrame) -> pd.DataFrame:
+def build_long_metrics(
+    summary_df: pd.DataFrame,
+    bootstrap_df: pd.DataFrame,
+    pair_detail_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """Combines the AP/AUC/calibration summary and bootstrap CIs into one tidy long table."""
     parts = [
-        _melt_wide(summary_df, _SUMMARY_METRICS, "genre_discrimination"),
-        _melt_wide(bootstrap_df, _BOOTSTRAP_METRICS, "bootstrap_ci"),
+        melt_to_long(summary_df, _SUMMARY_METRICS, "genre_discrimination"),
+        melt_to_long(bootstrap_df, _BOOTSTRAP_METRICS, "bootstrap_ci"),
     ]
-    long_df = pd.concat(parts, ignore_index=True)
-    base_variant = long_df["model"].apply(lambda m: pd.Series(split_model_name(m)))
-    long_df["model_base"] = base_variant[0]
-    long_df["text_variant"] = base_variant[1]
-    long_df = add_fdr_q_values(long_df)
-    return long_df[
-        [
-            "model",
-            "model_base",
-            "text_variant",
-            "scope",
-            "scope_kind",
-            "source",
-            "metric",
-            "value",
-            "q_value",
-            "q_value_by",
-        ]
-    ]
+    if pair_detail_df is not None:
+        #: Reports where an average precision is decided by one tie block rather than by ordering.
+        parts.append(tie_fractions_by_model(pair_detail_df))
+    return finalise_long_metrics(parts)
 
 
-def _pivot_wide(long_df: pd.DataFrame) -> pd.DataFrame:
-    """Pivots the long table wide on metric, adding `<metric>_q`/`_q_by` columns per p-value."""
-    index_cols = ["model", "model_base", "text_variant"]
-    values_wide = long_df.pivot_table(index=index_cols, columns="metric", values="value")
-    for q_column, suffix in (("q_value", "_q"), ("q_value_by", "_q_by")):
-        q_subset = long_df.dropna(subset=[q_column])
-        if q_subset.empty:
-            continue
-        q_wide = q_subset.pivot_table(index=index_cols, columns="metric", values=q_column)
-        q_wide.columns = [f"{col}{suffix}" for col in q_wide.columns]
-        values_wide = values_wide.join(q_wide)
-    return values_wide.reset_index()
-
-
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary-csv", type=Path, required=True)
     parser.add_argument("--bootstrap-csv", type=Path, required=True)
+    parser.add_argument("--detail-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     summary_df = pd.read_csv(args.summary_csv)
     bootstrap_df = pd.read_csv(args.bootstrap_csv)
+    pair_detail_df = pd.read_parquet(
+        args.detail_dir / "genre_pair_detail.parquet", columns=["model", "raw_similarity"]
+    )
 
-    long_df = build_long_metrics(summary_df, bootstrap_df)
-    long_df.to_parquet(args.output_dir / "genre_metrics_long.parquet", index=False)
+    long_df = build_long_metrics(summary_df, bootstrap_df, pair_detail_df)
+    write_dataframe_parquet(args.output_dir / "genre_metrics_long.parquet", long_df)
 
-    wide_df = _pivot_wide(long_df)
-    wide_df.to_parquet(args.output_dir / "genre_metrics_wide.parquet", index=False)
+    wide_df = pivot_metrics_wide(long_df, ["model", "model_base", "text_variant"])
+    write_dataframe_parquet(args.output_dir / "genre_metrics_wide.parquet", wide_df)
 
     print(f"genre_metrics_long: {len(long_df)} rows")
     print(f"genre_metrics_wide: {len(wide_df)} rows")

@@ -6,6 +6,8 @@ import numpy as np
 import pyarrow.parquet as pq
 import scipy.sparse as sp
 
+from library.errors import BenchmarkDataError
+
 TEXT_VARIANTS = ("consonantal", "vocalized", "cantillation")
 
 
@@ -16,6 +18,9 @@ def dataset_identifier(path: Path) -> str:
     while "=" in node.name and not node.name.startswith("domain="):
         parts.append(node.name.split("=", 1)[1])
         node = node.parent
+    #: An unpartitioned file names no model, and a blank name would reach the output as a real row.
+    if not parts:
+        raise BenchmarkDataError(f"{path} carries no Hive partition, so it names no model")
     return "_".join(reversed(parts))
 
 
@@ -33,8 +38,19 @@ def split_model_name(model: str, text_variants: tuple[str, ...] = TEXT_VARIANTS)
     return model.removeprefix("semantic_"), "unknown"
 
 
+def is_sparse_embeddings(path: Path) -> bool:
+    """Sparse files carry indices/values in place of a dense vector column."""
+    return "vector" not in pq.read_schema(path).names
+
+
 def load_embeddings(path: Path) -> dict[int, np.ndarray]:
     """Reads a Parquet embeddings file into a {node: vector} map, excluding zero-norm vectors."""
+    if is_sparse_embeddings(path):
+        #: `load_psalm_vectors` pools while still sparse, so prefer it for centroids.
+        node_ids, matrix = load_sparse_embeddings(path)
+        dense = matrix.toarray().astype("<f4", copy=False)
+        return {node: dense[i] for i, node in enumerate(node_ids)}
+
     table = pq.read_table(path, columns=["node_id", "vector"])
     node_ids = table["node_id"].to_numpy(zero_copy_only=False)
     vector_column = table["vector"].combine_chunks()

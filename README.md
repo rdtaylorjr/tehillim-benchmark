@@ -1,482 +1,111 @@
-# tehillim-benchmarks
+# tehillim-benchmark
 
-Evaluates embedding models against scholarly annotations of Psalms parallelism and genre, scoring vectors from
-[tehillim-embeddings](https://github.com/rdtaylorjr/tehillim-embeddings) on a retrieval benchmark
-built from aligned `parallel_*` Text-Fabric features. Consumes both as pure data dependencies,
-never as code dependencies.
+## Overview
 
-## Data sources
+This repository evaluates representations of Biblical Hebrew against two fixed Psalms annotations and a related trajectory analysis. It scores half-verse representations for their capacity to rank annotated parallel relationships, scores psalm representations for their capacity to separate a supplied genre classification, and tests whether ordered within-psalm representation profiles covary with that classification. It is the evaluation layer of the Tehillim project. Representation construction is in [tehillim-embeddings](https://github.com/rdtaylorjr/tehillim-embeddings) and generated outputs are in [tehillim-data](https://github.com/rdtaylorjr/tehillim-data).
 
-* **Parallelism structure**: `parallel_*` node features on BHSA `half_verse` nodes, loaded via
-  Text-Fabric's `use("etcbc/bhsa", mod="rdtaylorjr/tehillim-logos/tf")`. No local checkout
-  needed, Text-Fabric fetches and caches the module itself. The underlying annotations are
-  derived from the Logos Psalms Explorer Dataset, used with permission — see Citations below.
-* **Genre classification**: a genre-classification CSV (not included in this repo, supplied at
-  runtime) is likewise derived from the Logos Psalms Explorer Dataset — see Citations below.
-* **Embedding vectors**: Parquet files from a local `tehillim-embeddings` checkout, Hive-partitioned
-  at `data/domain=semantic/model=<slug>/text=<variant>/part-0.parquet`. `--checkout` on Text-Fabric
-  loaders and `embeddings_dir` on the scripts below are independent inputs.
+## Data
 
-Every benchmark script's `--output`/`--output-dir` writes into a local
-[tehillim-data](https://github.com/rdtaylorjr/tehillim-data) checkout, kept as a separate repo
-since result Parquet files run tens of megabytes each and bloat a code repo's clone size and
-history. That checkout is Hive-partitioned the same way as `tehillim-embeddings`:
-`benchmark={parallelism,genre,trajectory}/domain={lexical,semantic}/stage={raw,detail,master,shuffle_control}/...`.
-`stage=raw` holds each comparison script's own CSV output, `stage=detail` the per-observation
-Parquet export, `stage=master` the joined final report, `stage=shuffle_control` the order-shuffle
-null control. Trajectory has no `detail`/`master`/`shuffle_control` stage: `compute_profiles.py`
-writes both the per-model profile shards and the derived `trajectory_distances.parquet` together
-under `stage=profiles`, `validate_against_genre.py` writes its permutation-test CSVs under
-`stage=raw`, and `export_ui_rows.py` writes its JSON payloads under `stage=ui`. Point a script's
-`--output`/`--output-dir` at the matching `stage=` directory. `results.csv` in the examples below
-is illustrative, point it wherever you check that out.
+The parallelism benchmark reads `parallel_*` Text-Fabric features released by [tehillim-logos](https://github.com/rdtaylorjr/tehillim-logos) on ETCBC BHSA `half_verse` nodes. The features encode aligned group membership, type, signature, member span, and an ambiguity flag. They derive from Logos Bible Software's *Psalms Explorer Dataset*, used with permission. A separate runtime CSV assigns one of seven source genres to each of the 150 psalms. Neither licensed annotation source is committed here.
+
+The repository reads dense and sparse Parquet vectors keyed by BHSA node identifier from `tehillim-embeddings`. It writes CSV, Parquet, and JSON outputs to `tehillim-data` under `analysis=benchmark/benchmark={parallelism,genre,trajectory}/domain={...}/stage={...}`. This division keeps code, source annotation, representations, and derived results independently inspectable.
+
+The data are operational annotations rather than neutral descriptions of poetic form. Logos supplies neither an annotation protocol nor adjudication history nor inter-annotator reliability estimate. BHSA `half_verse` boundaries and its morphosyntactic features also embody ETCBC analytic decisions. The benchmark preserves these choices as data conditions and reports their consequences without treating them as settled linguistic categories.
 
 ## Methodology
 
-`parallelism.pairs.build_retrieval_pairs` reconstructs groups from the position-aligned
-`parallel_*` features, then decomposes each group's `parallel_signature` (e.g. `AB-AB-AB`) into
-retrieval pairs: adjacent member-slots within one strophe segment form a pair, a dashless tricolon
-like `ABC` gives overlapping pairs A-B and B-C. A pair is dropped if either slot is unresolved,
-flagged ambiguous (`parallel_ambiguous`), or both slots share one node.
+The loader reconstructs each annotation group from the `parallel_*` features. It converts a group signature into member-slot relations, preserving adjacent relations within a segment and matching reordered letters in a chiasm. A relation is excluded when a member is unresolved, marked ambiguous, or resolves to the same half-verse as its counterpart. Single-member segments produce no within-segment relation under this rule. This converts a literary annotation into a finite set of reproducible retrieval observations while keeping the omitted cases identifiable.
 
-The primary metric is Average Precision: rank every true pair and every baseline pair by cosine
-similarity and compute the area under the precision-recall curve, via
-`sklearn.metrics.average_precision_score`. This is the MTEB Pair Classification protocol
-(Muennighoff et al. 2023, EACL, "MTEB: Massive Text Embedding Benchmark"), chosen over AUC-ROC
-because AP is robust to class imbalance while AUC-ROC reads optimistically under it. AP's chance
-level is the positive-class prevalence, not 0.5, so raw AP is comparable across models within one
-scope but never across scopes with different true:baseline ratios.
+Average Precision is the primary outcome. Cosine similarity ranks annotated relations against adjacent, within-psalm half-verse pairs excluding nodes in surviving retrieval pairs. This local control retains generic adjacency and topical continuity. It does not create an unannotated nonparallel background because the source annotation covers most nodes. AUC, rank-based retrieval measures, similarity calibration against unmarked background nodes, and type-specific summaries remain secondary descriptions. Average Precision is reported with its positive-class prevalence because its scale depends on the true-to-control ratio.
 
-A separate negative control (`parallelism.baseline`) compares true-pair similarity against adjacent
-colon bicola never annotated as parallel, to check whether elevated similarity is specific to
-genuine parallelism or reflects generic topical continuity between neighboring lines. Results are
-reported per Lowth's original typology (Lowth 1778: synonymous, antithetic, synthetic) as extended
-by later scholarship (staircase/climactic, emblematic), each type reported separately.
+Confidence intervals use a psalm-clustered BCa bootstrap. Resampling whole psalms retains the dependence among relations drawn from the same poem. Genre confidence intervals use a vertex bootstrap that resamples psalms and reconstructs their derived pair population. The code applies Benjamini-Hochberg and Benjamini-Yekutieli adjustments within defined metric, source, and scope families. Per-genre permutation tests shuffle psalm labels and use a joint maxT null across genres. These procedures test evidence against the stated labels. They do not decide whether a representation has captured parallelism or genre as literary phenomena.
 
-### Statistical methodology
+When a vertex bootstrap resamples the same original psalm more than once, pairs between those repeated draws are excluded before scoring. Such pairs are constructed positives with cosine similarity `1.0`, rather than observed psalm pairs.
 
-* **Effect size vs. z-score**: `parallelism.calibration` exposes `calibrated_z_score` (a true
-  z-score, for a single observation against the background distribution) and
-  `calibrated_effect_size` (a Cohen's-d-style standardized effect size, for a group mean, since
-  dividing a mean by the background's population standard deviation is not a sampling-distribution
-  statistic).
-* **Background exclusion**: the background similarity distribution used to calibrate every effect
-  size excludes nodes that participate in a true parallel pair, so the null is never partly built
-  from the signal it's calibrating.
-* **Multiple-comparison correction**: `parallelism.multiple_comparisons.add_fdr_q_values` adds a
-  Benjamini-Hochberg `q_value` (Benjamini & Hochberg 1995) and a Benjamini-Yekutieli `q_value_by`
-  (Benjamini & Yekutieli 2001, valid under arbitrary dependence, since a base model's text variants
-  are correlated) next to every p-value. Correction families are keyed on
-  `(source, metric, scope_kind)`, an "overall" p-value is never pooled with the per-type p-values
-  that constitute it.
-* **Cluster-robust permutation test**: `parallelism.retrieval_metrics.stratified_mean_gap_test`'s
-  per-anchor null average excludes both the anchor's diagonal similarity and the permutation
-  draw's labeled-true column, so the true signal cannot leak into the null it's compared against.
-* **Cluster bootstrap with a BCa interval**: pairwise similarities sharing a source or target vector
-  are correlated, so `parallelism.bootstrap.block_bootstrap_ap_gap_and_auc` resamples whole psalms,
-  the natural cluster unit. AP and AUC are bounded and can be skewed near [0, 1], where a plain
-  percentile interval undercovers, so the reported interval is BCa (Efron 1987) with a
-  leave-one-psalm-out jackknife acceleration term, plain percentile bounds kept alongside for
-  comparison.
+For genre discrimination, each psalm vector is the mean of its available half-verse vectors. The evaluator scores all 11,175 unordered psalm pairs, labeling a pair positive when both psalms share the supplied source genre. It reports pooled and one-versus-rest Average Precision and AUC. The unequal class sizes make pooled outcomes largely responsive to prevalent genres, so genre-specific results remain necessary.
 
-## Genre benchmark
+Trajectory analysis retains half-verse order. It derives a psalm centroid, an ordered cosine self-similarity matrix, adjacent similarity, step magnitude, and turning angle. Structural profiles are compared after length-normalized resampling or dynamic-time-warping alignment. Permutation tests compare within- and between-genre distances before and after residualizing distance on length difference, then on length difference and content distance. These controls identify whether an association persists under those specified nuisance models. They do not supply a theory-free separation of form from meaning.
 
-`src/genre` scores the same embedding models against a second, independent benchmark: does an
-embedding put same-genre psalms closer together than different-genre psalms? The labels are a
-third-party psalm genre classification (not included in this repo, supplied at runtime), which
-labels each of the 150 psalms with exactly one of seven genres (Lament, Praise, Hymn, Royal,
-Wisdom, Thanksgiving, Trust); it is a distinct data source from the `parallel_*` structure above,
-though both ultimately derive from the same dataset, used with permission (see Citations below).
-The two benchmarks share their embedding inputs and their statistical machinery (`src/library`).
+## Results
 
-Every one of the C(150, 2) = 11,175 psalm pairs is scored: `genre.pairs.build_genre_pairs` labels a
-pair `same_genre` when both psalms carry the same genre. Each psalm's vector is the mean of
-its colon embeddings (`genre.centroid.psalm_centroids`). Average Precision and AUC are
-computed exactly as in the parallelism benchmark (`genre.evaluate.evaluate_genre_discrimination`),
-ranking same-genre pairs against different-genre pairs by cosine similarity.
+The current public interface payloads contain 148 parallelism variants and 222 genre variants, excluding order-shuffle draws. An earlier result-store summary reported 222 parallelism and 220 genre variants. The repository has no release manifest that reconciles those output versions. The following descriptive maxima identify variants in the public payloads.
 
-Because genre pairs are exhaustive over the full psalm population rather than a sparse annotated
-subset, there is no separate baseline population to calibrate against, so the background for
-effect sizes is the full 150-psalm-centroid population itself (`genre.scripts.compare_calibrated`).
-The bootstrap CI (`genre.bootstrap.block_bootstrap_genre_ap_gap_and_auc`) generalizes the same
-psalm-clustered BCa principle to genre's fully symmetric structure via a vertex bootstrap: resample
-the 150 psalms with replacement and reconstruct the pairwise similarity/genre-match matrices from
-the resampled psalms, rather than resampling the derived pairs directly.
+| Domain | Parallelism maximum AP | Genre maximum AP |
+| --- | --- | --- |
+| Semantic | `kalm_embedding_gemma3_12b_2511_cantillation`, 0.395 | `gemini_embedding_2_cantillation`, 0.400 |
+| Syntactic | `phrase_subphrase_rela_1gram`, 0.384 | `phrase_marginal_typ_function`, 0.357 |
+| Morphological | `morph_prs_ps_sp_plus`, 0.383 | `morph_prs_ps_sp_plus`, 0.356 |
+| Lexical | `homograph_log_count`, 0.344 | `word_consonantal_icf_position_mean_psalm`, 0.460 |
 
-| script | computes |
-|---|---|
-| `compare_models.py` | raw Average Precision (primary) and AUC, every model |
-| `compare_calibrated.py` | same/different-genre calibrated effect size on top of AP/AUC |
-| `compare_by_genre.py` | one-vs-rest AP/AUC per individual genre, with psalm-label permutation inference |
-| `export_detail.py` | row-per-pair raw similarity and calibrated z, plus a per-model summary |
-| `compute_bootstrap_cis.py` | psalm vertex-resampling BCa 95% CI on AP, gap, and AUC |
-| `build_master_report.py` | joins the CSVs above into one master Parquet set with BY-FDR q-values |
+The semantic parallelism maximum is calculated from 1,110 annotated relations and 2,784 local control pairs, giving an AP prevalence of 0.285. The 2,292 source groups become this scored relation set through explicit losses: 790 groups produce no relation under the signature rule, while 2,292 of 3,450 generated candidate pairs resolve to one half-verse, 43 include an ambiguous member, and five lack a member. The local control includes an annotation-bearing node in 2,720 pairs. Only 64 adjacent bicola carry no `parallel_*` annotation. Genre outcomes use the 11,175 unordered psalm pairs. These maxima summarize different input families and class prevalences. They do not supply a common scale of linguistic adequacy or a model-selection rule.
+
+The result store also records a recurring negative pattern: all 43 semantic variants place the supplied Hymn class below AUC 0.5, with a mean AUC of 0.385 and a maximum of 0.469. This outcome warrants inspection of the source labels, the class composition, psalm length, and representation behavior. It does not establish that hymns lack a coherent literary profile.
+
+## Limitations
+
+Parallelism and genre scores quantify agreement with one commercial annotation resource. Source agreement does not validate a reference account of Hebrew poetry. A single genre per psalm suppresses mixed forms, diachronic relations, and the possibility that source categories overlap. The treatment of Psalms 57, 60, and 108 illustrates this constraint because Psalm 108 combines material from texts assigned another source category.
+
+The adjacent control excludes scored retrieval pairs, yet it cannot match every source of lexical, grammatical, topical, or positional dependence. It also cannot establish a contrast with nonparallel text because only 64 adjacent bicola lack the source annotation. Scores are pooled across BHSA text types. Since text type is a syntactic analysis that can covary with the supplied genre labels, a pooled genre result cannot distinguish genre association from text-type composition. Representation choices and reported maxima use the same annotations and corpus. They are exploratory comparisons, without a held-out psalm partition or a null that reassigns annotation groups under within-psalm constraints. Psalm-level resampling addresses clustering at that level while leaving dependence within annotation groups and between textual relatives. Trajectory residualization depends on linear nuisance models and observable covariates. Remote embedding services and evolving model checkpoints can also change an input representation without changing this code.
+
+A future confirmatory pass should fix representation choices on a predetermined psalm partition, evaluate them on a separate partition, stratify or condition on text type, and compare observed scores with within-psalm annotation reassignments that preserve documented group conditions. These procedures can test a stated representation claim. They cannot resolve the source taxonomy or interpret a poem.
+
+## Reproducibility
+
+Python 3.10 or later and the dependencies in `pyproject.toml` are required. The BHSA checkout is pinned to `v1.8.1` and the Logos Text-Fabric module to `v1.0`. Unit tests run without licensed annotations or vector files. Integration runs require permitted access to the Logos features, the source genre CSV, a local embeddings checkout, and a writable data checkout. The scripts accept model names, input paths, seeds, control settings, and output partitions. The emitted public payloads do not yet carry a complete manifest of those inputs or a source-code revision. The result-version discrepancy above shows why a release manifest is necessary. Byte-identical reproduction depends on access to the same external annotation and model artifacts.
+
+Sparse `morph_signature` trigram partitions require the library's sparse evaluation path. The standard batch commands do not dispatch to that path.
+
+## Installation
 
 ```bash
-.venv/bin/python -m genre.scripts.compare_calibrated \
-  /path/to/genre-labels.csv /path/to/tehillim-embeddings/data/domain=semantic --output results.csv
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+./check.sh
 ```
-
-### Per-genre one-vs-rest breakdown and its inference layer
-
-The whole-population comparison above answers "genre in general vs. not," but genre labels
-are heavily imbalanced (Lament 59 psalms, Praise 41, vs. Trust 6, Wisdom 9, Thanksgiving 8), so a
-"genre signal detected" finding there is closer to "Lament/Praise is separable" than "genre in
-general is separable." `genre.scripts.compare_by_genre` restricts to one genre at a time
-(`genre.pairs.filter_pairs_by_genre`, pairs touching that genre on either side, the standard
-one-vs-rest extension of a binary discrimination task) and reports AP/AUC per (model, genre).
-
-Its first version computed significance the same way `evaluate_genre_discrimination` does: a flat
-`scipy.stats.mannwhitneyu` over every pairwise psalm comparison. For a genre with few psalms and
-many pairs, that overstates the effective sample size (Lament's 1,711 same-genre pairs come from
-only 59 psalms, `C(59,2)=1711`), which is anti-conservative. The corrected version
-(`genre.permutation.joint_psalm_label_permutation_test`) instead permutes psalm-level genre labels
-(not pair rows), recomputing every genre's one-vs-rest AUC from the same permuted draw so a
-Westfall-Young (1993) maxT correction is valid across the 7 genres jointly, exactly the same
-psalm-level permutation principle already verified in `trajectory.scripts.validate_against_genre`.
-The permuted statistic is signed (matching `evaluate_genre_discrimination`'s one-sided
-`alternative="greater"` test: same-genre more similar than different-genre, not merely different in
-either direction), since an unsigned `|AUC-0.5|` statistic would also credit a genre separated in
-the *opposite* direction as "significant," which one real run caught directly: Hymn's naive test
-and corrected permutation test disagreed sharply until the sign was fixed, because most models'
-Hymn AUC sits below 0.5 (same-genre psalms less similar to each other than to other genres), a
-real effect the one-sided test is designed to ignore, not detect.
-
-Every model/genre row reports three p-values, `separation_p_naive` (the legacy flat Mann-Whitney
-p, kept for reproducibility), `separation_p_perm` (the psalm-label permutation p), and
-`separation_p_maxT` (the joint family-wise-corrected p), plus a jackknife BCa 95% CI on AP and AUC
-(`genre.bootstrap.block_bootstrap_genre_ap_gap_and_auc`, generalized with a `population_mask`
-parameter to restrict its existing psalm-vertex resampling to a one-vs-rest population). BH/BY-FDR
-applies to each p-value source independently, scoped per genre. Ranking (which representation has
-the highest AP for a genre) and significance (whether that separation exceeds a psalm-level
-permutation null) are reported as separate questions, since a representation can rank first for a
-genre descriptively while still failing to clear the permutation bar, or vice versa.
-
-```bash
-.venv/bin/python -m genre.scripts.compare_by_genre \
-  /path/to/genre-labels.csv /path/to/tehillim-embeddings/data --output results.csv
-```
-
-## Lexical benchmark
-
-`tehillim-embeddings` also ships lexical representations (`data/domain=lexical/`), built from
-BHSA's lexical and surface-form features rather than a learned embedding model, across three
-units: `homograph` (bare consonantal spelling, BHSA's `lex0`), `lexeme` (disambiguated
-dictionary entry, BHSA's `lex`), and `word` (the inflected surface form, in `consonantal`,
-`vocalized`, and `cantillation` text tiers). They score against the same parallelism and genre
-benchmarks above, through the same evaluation code, no separate pipeline. Two architectural
-variants exist for the positional/recurrence weightings: colon-level (each colon's vector
-distinct, correct for parallelism's pairwise colon comparison) and psalm-broadcast (one
-whole-psalm vector repeated across its colons, correct for genre's mean-pooled psalm centroid),
-documented in `tehillim-embeddings`'s README. Parallelism-scoped UI tables exclude
-`_psalm`-suffixed models (`ui_export.export._drop_psalm_level_models`), since a broadcast vector is
-architecturally degenerate for a colon-pairwise task. Genre tables keep them.
-
-### Order-shuffle-null control
-
-Some lexical representations encode colon order directly (position-binned pyramids, lag-binned
-recurrence). `library.order_shuffle.order_shuffle_result` tests whether a representation's
-benchmark score reflects genuine order signal or a mechanical artifact of the binning: score the
-real embeddings, score N within-psalm-order-shuffled embeddings
-(`lexical.scripts.generate_shuffle_control[_colon]` in `tehillim-embeddings`), and report
-`delta_order` (real score minus mean shuffled score) with a rank-based permutation p-value,
-`(count(shuffled >= real) + 1) / (n + 1)`, the same convention used everywhere else in this project.
-This replaced an earlier ad hoc z-score computed from a 30-draw empirical mean/std, which implied a
-Gaussian-tail interpretation the sample size cannot support.
-
-N is the `--n-shuffles` argument, defaulting to `library.order_shuffle.DEFAULT_N_SHUFFLES` = 1000.
-The floor `1 / (N + 1)` bounds every p-value the control can produce, so a small N caps the
-smallest reachable BH q-value as well. `library.order_shuffle.minimum_shuffles_for_fdr` returns the
-fewest shuffles whose floor still satisfies `1 / (N + 1) <= alpha / m` for m hypotheses, 19 for a
-single hypothesis and 139 for the 7 genres at alpha = 0.05, and `order_shuffle_result` warns when
-the supplied shuffle count falls under it.
-
-```bash
-.venv/bin/python -m genre.scripts.shuffle_order_control \
-  /path/to/genre-labels.csv /path/to/real_embeddings.parquet /path/to/shuffled_dir --output results.csv
-.venv/bin/python -m parallelism.scripts.shuffle_order_control \
-  /path/to/real_embeddings.parquet /path/to/shuffled_dir --output results.csv
-```
-
-Run against `icf_posmean_psalm` (genre) and `icf_pos4` (parallelism), both at 1000 shuffles.
-Genre shows an order effect in Hymn (`delta_order=+0.2584`) and Lament (`delta_order=+0.0319`),
-each at the p-value floor of 1/1001 = 0.000999, which clears FDR correction across the 7 genres
-under BH (q=0.0035) and under BY (q=0.0091). The remaining five genres show no effect, with
-`delta_order` between -0.0072 and +0.0012. Parallelism's `icf_pos4` tests a single hypothesis and
-shows an order effect (`delta_order=+0.1767, p=0.000999`), though the shuffle design alone cannot
-distinguish a genuine colon-order signal from a bin-adjacency artifact of the positional binning
-itself, an open question left unresolved by this control.
-
-An earlier run of this control used 30 shuffles, which put the p-value floor at 1/31 = 0.0323. Hymn
-and Lament landed on that floor, and two hypotheses tied there out of 7 fixed their BH q at
-(7/2) x 0.0323 = 0.1129 and their BY q at 0.2927, so the genre result could not have cleared
-q < 0.05 at any effect size. That run is archived in `tehillim-data` under
-`archive=shuffle_control_n30/`. Its failure to survive correction was a property of the shuffle
-count, and the 1000-shuffle run replaces it.
-
-### BHSA checkout pin
-
-`library.bhsa.DEFAULT_CHECKOUT` is pinned to `v1.8.1`, matching `tehillim-embeddings`'s local
-BHSA clone, rather than floating on `"latest"`. `parallelism.tf_features.load_api` uses a separate
-`_TEHILLIM_LOGOS_CHECKOUT = "v1.0"` for the `rdtaylorjr/tehillim-logos`
-module, since that module has an independent release history and cannot share BHSA's pin.
-
-`library.bhsa.load_bhsa_api` tries the local BHSA clone at `~/Developer/hebrew/bhsa/tf/2021` first,
-the same clone `tehillim-embeddings` reads from. Only if that fails does it fall back to
-Text-Fabric's `use()`, with a 30-second timeout (`DEFAULT_USE_TIMEOUT_SECONDS`), since `use()`
-re-verifies its release against GitHub's API even when the data is fully cached locally, and can
-stall or back off for minutes under a GitHub rate limit.
-
-## Morphology benchmark
-
-`tehillim-embeddings` also ships morphology representations (`data/domain=morphology/`),
-built from BHSA's word-level grammatical features (part of speech, agreement, verbal stem/tense,
-pronominal-suffix morphology) rather than lexical identity or a learned embedding model. They
-score against the same parallelism and genre benchmarks above, through the same evaluation code, no
-separate pipeline, with the same colon-level/psalm-broadcast split as the lexical domain
-(`_psalm`-suffixed models excluded from parallelism-scoped UI tables, kept for genre). One
-representation, `morph_suffix_posmean` (psalm-scale deployment), has no colon-level form at all and
-isn't marked by the `_psalm` naming convention, so it's excluded from parallelism scoring entirely
-rather than relying on `_drop_psalm_level_models` to catch it.
-
-### Sparse embedding scoring
-
-One morphology representation, `morph_signature`'s trigram construction, has 75,894 dimensions
-with at most a few dozen nonzero entries per colon, and is stored sparse
-(`node_id`/`indices`/`values` Parquet schema, `sparse=true` in the file's schema metadata) rather
-than as a dense `vector` column, to avoid materializing a mostly-zero array per colon.
-`library.embeddings.load_sparse_embeddings` reads it into a `scipy.sparse.csr_matrix`, and
-`library.retrieval_metrics.sparse_cosine_similarity_matrix`,
-`parallelism.evaluate.build_side_vectors_sparse`/`run_evaluation_sparse`, and
-`library.centroid.sparse_psalm_centroids` with
-`genre.evaluate.evaluate_genre_discrimination_sparse`/`genre.scripts.compare_by_genre.compare_model_across_genres_sparse`
-score it without ever densifying the vectors, only the small model-sized similarity matrix each
-produces. The standard comparison scripts (`compare_models.py`, `compare_calibrated.py`,
-`compute_bootstrap_cis.py`, `compare_true_similarity.py`, both `export_detail.py` scripts) read
-only the dense schema and do not dispatch to this path; scoring the sparse trigram family currently
-requires calling the sparse functions directly.
-
-## Structural trajectory analysis
-
-`src/trajectory` asks a different kind of question than the two benchmarks above: how a psalm's
-meaning moves through the poem, independent of any benchmark ranking, rather than whether an
-embedding model discriminates a labeled phenomenon. It is computed for every model in a
-`tehillim-embeddings` checkout, never filtered to a top-k subset, so this analysis never depends on
-how a model scored elsewhere.
-
-Every psalm gets two independent representations. The **content centroid**
-(`library.centroid.psalm_centroids`, shared with the genre benchmark) is the mean of its cola
-embeddings, capturing what the psalm is about. The **structural profile**
-(`trajectory.self_similarity`) is its self-similarity matrix, `S[i, j] = cos(cola_i, cola_j)` over
-the psalm's ordered cola, capturing how it moves through semantic space. Psalms differ in cola
-count, so `resample_to_grid` maps each psalm's matrix onto a fixed `grid_size x grid_size` grid over
-relative position `t = i / (n-1)`, making psalms of any length directly comparable.
-`trajectory.geometry` derives three further position-indexed curves from the same ordered,
-L2-normalized sequence (adjacent-cola similarity, step magnitude, turning angle between
-consecutive displacements), each resampled onto the same grid.
-
-`trajectory.distance.content_distance` (1 minus centroid cosine similarity) and
-`structural_distance` (RMS difference between two resampled structural profiles) let two psalms be
-compared on topic and on architecture separately.
-
-`trajectory.scripts.validate_against_genre` is a second, independent validation of the genre
-signal, deliberately apart from the AP/AUC machinery above: a permutation test of whether same-genre
-psalm pairs sit closer together than different-genre pairs, on all five distance metrics. Because
-genre labels correlate with psalm length in this corpus (Hymns are short, Wisdom psalms are
-long and highly variable), raw distance comparisons are confounded with length. `residualize_by_length`
-removes that confound via the Still-White (1981) nuisance-covariate control: fit distance on
-`|length difference|`, then permute genre labels against the fixed residual. Gail, Tan, and
-Piantadosi (1988) give the general covariate form, and Winkler et al. (2014) catalogue it as
-Still-White to separate it from Freedman-Lane (1983), which permutes the reduced-model residuals,
-and from Kennedy (1995), which residualizes the genre labels on the covariate as well. Neither of
-those applies here. The exchangeable unit is the psalm while the residuals live on psalm pairs, so
-the labels are the only thing that can be permuted. Three sources are reported side by side per metric: `raw`, `length_controlled`, and
-(for every metric except `content_distance` itself) `length_and_content_controlled`, which
-additionally residualizes on `content_distance` as a second covariate, isolating a structural
-metric's signal from topic.
-
-### Per-genre breakdown
-
-Like the genre benchmark's per-genre extension above, the pooled test only answers whether
-genre affects a distance metric at all, not which genres carry that signal.
-`trajectory.genre_breakdown.joint_genre_breakdown_permutation_test` restricts the same permutation
-test to one genre's one-vs-rest population at a time, reusing `genre.permutation.one_vs_rest_masks`
-directly, with a Westfall-Young (1993) maxT correction across the 7 genres, computed once per
-(model, metric, source). The population and same-genre sums are reformulated as quadratic forms
-over the n x n psalm-pair distance matrix rather than materialized per permutation per pair, since
-the naive per-pair form does not scale past a few thousand permutations at 150 psalms.
-
-| script | computes |
-|---|---|
-| `compute_profiles.py` | content centroid, structural profile, and geometry curves per psalm, every model |
-| `validate_against_genre.py` | pooled permutation test of within/between-genre distance (raw, length-controlled, length-and-content-controlled), plus a per-genre one-vs-rest breakdown |
-| `export_ui_rows.py` | selects the UI's trajectory columns from `validate_against_genre.py`'s CSVs |
-
-```bash
-DATA=/path/to/tehillim-data/benchmark=trajectory/domain=semantic
-.venv/bin/python -m trajectory.scripts.compute_profiles \
-  /path/to/tehillim-embeddings/data/domain=semantic \
-  --output-dir "$DATA/stage=profiles"
-.venv/bin/python -m trajectory.scripts.validate_against_genre \
-  /path/to/genre-labels.csv \
-  "$DATA/stage=profiles/trajectory_distances.parquet" \
-  --output "$DATA/stage=raw/validate_against_genre.csv" \
-  --breakdown-output "$DATA/stage=raw/validate_against_genre_by_genre.csv"
-.venv/bin/python -m trajectory.scripts.export_ui_rows \
-  "$DATA/stage=raw/validate_against_genre.csv" \
-  --breakdown-csv "$DATA/stage=raw/validate_against_genre_by_genre.csv" \
-  --output "$DATA/stage=ui/ui_rows.json" \
-  --breakdown-output "$DATA/stage=ui/ui_rows_by_genre.json"
-```
-
-## Results UI
-
-The results page lives in [tehillim](https://github.com/rdtaylorjr/tehillim), which
-depends only on the JSON this repo produces, never on its Python. Two exports feed it.
-
-`ui_export.export` selects one domain's table columns, writing `ui_<domain>.json` plus one file per
-trajectory metric, since the per-genre view reads a single metric at a time. These are small and
-ship with the site, in its `public/data`.
-
-```bash
-DATA=/path/to/tehillim-data
-SITE=/path/to/tehillim
-.venv/bin/python -m ui_export.export syntax \
-  --parallelism-dir "$DATA/benchmark=parallelism/domain=syntax" \
-  --genre-dir "$DATA/benchmark=genre/domain=syntax" \
-  --trajectory-ui-rows "$DATA/benchmark=trajectory/domain=syntax/stage=ui/ui_rows.json" \
-  --trajectory-by-genre-rows "$DATA/benchmark=trajectory/domain=syntax/stage=ui/ui_rows_by_genre.json" \
-  --output "$SITE/public/data/ui_syntax.json"
-```
-
-`ui_export.scripts.build_detail_json` writes the per-model charts a table row opens: one file per
-model per section, because the detail view renders exactly the section the toolbar selected. These
-are large and are served from object storage rather than shipped with the site, so `--output-dir`
-points at a directory the site does not build from.
-
-```bash
-.venv/bin/python -m ui_export.scripts.build_detail_json \
-  /path/to/psalms-browser.csv \
-  --data-dir "$DATA" \
-  --ui-dir "$SITE/public/data" \
-  --domains semantic lexical morphology syntax \
-  --output-dir "$SITE/detail-data" \
-  --workers 4
-```
-
-`--ui-dir` is separate from `--data-dir` because the table payloads live with the site while the
-benchmark Parquet stays here. A model whose trajectory metrics are all NaN gets no trajectory
-section, and the page says so rather than rendering an empty chart.
 
 ## Usage
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-```
-
-Score one embedding file:
+Run a benchmark script with an embeddings directory and a matching output directory in a local `tehillim-data` checkout.
 
 ```bash
-.venv/bin/python -m parallelism.evaluate \
-  /path/to/tehillim-embeddings/data/domain=semantic/model=bge_m3/text=vocalized/part-0.parquet
+.venv/bin/python -m genre.scripts.compare_models \
+  /path/to/genre-labels.csv \
+  /path/to/tehillim-embeddings/data \
+  --output /path/to/tehillim-data/analysis=benchmark/benchmark=genre/domain=semantic/stage=raw/summary.csv
 ```
 
-Score every model in a `tehillim-embeddings` checkout's data directory:
+## References
 
-| script | computes |
-|---|---|
-| `compare_models.py` | separation AUC, discrimination, type-stratified permutation test, MRR/Recall@k, overall and per-type |
-| `compare_true_similarity.py` | calibrated effect size of true-pair similarity, overall and per-type |
-| `compare_baseline.py` | true-pair vs. unmarked-bicola Average Precision, AUC, effect sizes |
-| `export_detail.py` | row-per-observation raw similarity, rank, and vs-baseline detail (no aggregation) |
-| `compute_bootstrap_cis.py` | psalm-clustered BCa 95% CI on AP, gap, and AUC, overall + per-type |
-| `build_master_report.py` | joins the CSVs above into one master Parquet set |
+Benjamini, Yoav, and Yosef Hochberg. 1995. [“Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing.”](https://doi.org/10.1111/j.2517-6161.1995.tb02031.x) *Journal of the Royal Statistical Society: Series B* 57.1: 289-300.
 
-```bash
-.venv/bin/python -m parallelism.scripts.compare_models \
-  /path/to/tehillim-embeddings/data/domain=semantic --output results.csv
-```
+Benjamini, Yoav, and Daniel Yekutieli. 2001. [“The Control of the False Discovery Rate in Multiple Testing under Dependency.”](https://doi.org/10.1214/aos/1013699998) *Annals of Statistics* 29.4: 1165-1188.
 
-`model` in every output splits into `model_base` and `text_variant` (consonantal/vocalized/
-cantillation) for cross-variant comparison. `dataset_identifier()` derives this from the
-Hive-partitioned path (`model=<slug>/text=<variant>/`), not the filename.
+Efron, Bradley. 1987. [“Better Bootstrap Confidence Intervals.”](https://doi.org/10.1080/01621459.1987.10478410) *Journal of the American Statistical Association* 82.397: 171-185.
 
-### Incremental caching
+de la Selle, Théotime, and Laurence Mellerin. [“Detection and Typology of Psalmic Text Reuses in the New Testament.”](https://doi.org/10.3390/rel17010088) *Religions* 17, no. 1 (2026): 88.
 
-Every comparison script above (`compare_models.py`, `compare_baseline.py`,
-`compare_true_similarity.py`, `compare_calibrated.py`, `compute_bootstrap_cis.py`,
-`compare_by_genre.py`, both `export_detail.py` scripts, `compute_profiles.py`) reads its
-`--output` path as an implicit cache. A model already present there is skipped on rerun, and its
-cached row is kept in the final output (`library.incremental_cache.load_cached_rows` for a single
-CSV, `load_cached_parquet_set` for the multi-file detail exports). Delete the output file, or a
-row from it, to force that model to rescore. Four genre scripts (`compare_calibrated.py`,
-`compute_bootstrap_cis.py`, `export_detail.py`, `compare_by_genre.py`) also skip, rather than
-raise, a model whose psalm population is too small for its background similarity distribution to
-have any variance, since one already-cached run is not worth losing to a single degenerate model.
+Davis, Jesse, and Mark Goadrich. 2006. [“The Relationship Between Precision-Recall and ROC Curves.”](https://doi.org/10.1145/1143844.1143874) In *Proceedings of the 23rd International Conference on Machine Learning*, 233-240. ACM.
 
-## Test
+Gillmayr-Bucher, Susanne. [“Relecture of Biblical Psalms: A Computer Aided Analysis of Textual Relations Based on Semantic Domains.”](https://doi.org/10.1163/9789004493339_021) Pages 309-321 in *Bible and Computer: The Stellenbosch AIBI-6 Conference*. Leiden: Brill, 2002.
 
-```bash
-.venv/bin/pytest && .venv/bin/ruff check src tests && .venv/bin/mypy src
-```
+Montaner, Luis Vegas. “Masoretic Tradition and Syntactic Analysis of the Psalms.” Pages 317-335 in *Tradition and Innovation in Biblical Interpretation: Studies Presented to Professor Eep Talstra on the Occasion of His Sixty-Fifth Birthday*, 2011.
 
-## Family
+Muennighoff, Niklas, Nouamane Tazi, Loic Magne, and Nils Reimers. 2023. [“MTEB: Massive Text Embedding Benchmark.”](https://aclanthology.org/2023.eacl-main.148/) In *Proceedings of EACL 2023*, 2014-2037.
 
-* [tehillim-embeddings](https://github.com/rdtaylorjr/tehillim-embeddings): the embedding vectors
-  scored here
-* [tehillim](https://github.com/rdtaylorjr/tehillim): the results page that renders this
-  repo's `ui_<domain>.json` and per-model detail output
-* [tehillim-data](https://github.com/rdtaylorjr/tehillim-data): hosts this repo's Parquet/CSV/JSON
-  output
-* [bhsa](https://github.com/etcbc/bhsa): the core text and linguistic annotation for the Hebrew
-  Bible
+Naaijer, Martijn, and Dirk Roorda. [“Parallel Texts in the Hebrew Bible, New Methods and Visualizations.”](https://doi.org/10.48550/arXiv.1603.01541) 2016.
 
-## Citations
+Phipson, Belinda, and Gordon K. Smyth. 2010. [“Permutation P-values Should Never Be Zero: Calculating Exact P-values When Permutations Are Randomly Drawn.”](https://doi.org/10.2202/1544-6115.1585) *Statistical Applications in Genetics and Molecular Biology* 9.1.
 
-**Parallelism and genre data**
+Roorda, Dirk, Christiaan Erwich, Cody Kingham, and SeHoon Park. 2023. [*ETCBC/bhsa*](https://github.com/ETCBC/bhsa).
 
-> Witthoff, David, Kris Lyle, Matt Nerdahl, Jimmy Parks, and Elliot Ritzema. *Psalms Explorer
-> Dataset*. Edited by Eli Evans. Bellingham, WA: Logos Bible Software.
-> https://www.logos.com/product/54188/psalms-explorer-dataset.
+Sakoe, Hiroaki, and Seibi Chiba. 1978. [“Dynamic Programming Algorithm Optimization for Spoken Word Recognition.”](https://doi.org/10.1109/TASSP.1978.1163055) *IEEE Transactions on Acoustics, Speech, and Signal Processing* 26.1: 43-49.
 
-Used with permission.
+Smiley, David M. [“Intertextual Parallel Detection in Biblical Hebrew: A Transformer-Based Benchmark.”](https://doi.org/10.48550/arXiv.2506.24117) 2025.
 
-**Statistical methods**
+Westfall, Peter H., and S. Stanley Young. 1993. *Resampling-Based Multiple Testing: Examples and Methods for P-Value Adjustment*. Wiley.
 
-> Benjamini, Yoav, and Yosef Hochberg. "Controlling the False Discovery Rate: A Practical and
-> Powerful Approach to Multiple Testing." *Journal of the Royal Statistical Society, Series B*
-> 57.1 (1995): 289-300. https://doi.org/10.1111/j.2517-6161.1995.tb02031.x.
-
-> Benjamini, Yoav, and Daniel Yekutieli. "The Control of the False Discovery Rate in Multiple
-> Testing under Dependency." *Annals of Statistics* 29.4 (2001): 1165-1188.
-> https://doi.org/10.1214/aos/1013699998.
-
-> Efron, Bradley. "Better Bootstrap Confidence Intervals." *Journal of the American Statistical
-> Association* 82.397 (1987): 171-185. https://doi.org/10.1080/01621459.1987.10478410.
-
-> Gail, Mitchell H., Wai Y. Tan, and Steven Piantadosi. "Tests for No Treatment Effect in
-> Randomized Clinical Trials." *Biometrika* 75.1 (1988): 57-64.
-> https://doi.org/10.1093/biomet/75.1.57.
-
-> Kennedy, Peter E. "Randomization Tests in Econometrics." *Journal of Business and Economic
-> Statistics* 13.1 (1995): 85-94. https://doi.org/10.1080/07350015.1995.10524581.
-
-> Still, Arthur W., and Anthony P. White. "The Approximate Randomization Test as an Alternative to
-> the F Test in Analysis of Variance." *British Journal of Mathematical and Statistical Psychology*
-> 34.2 (1981): 243-252. https://doi.org/10.1111/j.2044-8317.1981.tb00634.x.
-
-> Westfall, Peter H., and S. Stanley Young. *Resampling-Based Multiple Testing: Examples and
-> Methods for p-Value Adjustment*. Wiley Series in Probability and Statistics. New York: Wiley,
-> 1993.
-
-> Winkler, Anderson M., Gerard R. Ridgway, Matthew A. Webster, Stephen M. Smith, and Thomas E.
-> Nichols. "Permutation Inference for the General Linear Model." *NeuroImage* 92 (2014): 381-397.
-> https://doi.org/10.1016/j.neuroimage.2014.01.060.
+Winkler, Anderson M., Gerard R. Ridgway, Matthew A. Webster, Stephen M. Smith, and Thomas E. Nichols. 2014. [“Permutation Inference for the General Linear Model.”](https://doi.org/10.1016/j.neuroimage.2014.01.060) *NeuroImage* 92: 381-397.
 
 ## License
 
-MIT
-
-## Author
-
-* [Russell D. Taylor Jr.](mailto:rdtaylorjr@gatech.edu)
+MIT. The Logos annotation source and BHSA data have separate terms of use.

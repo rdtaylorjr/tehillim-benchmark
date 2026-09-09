@@ -26,30 +26,32 @@ def load_api(checkout: str = DEFAULT_CHECKOUT) -> Any:
 
 
 def read_node_feature_values(api: Any) -> dict[int, dict[str, str]]:
-    """Reads every Psalms colon node's parallel_* values, skipping nodes with none."""
+    """Reads every Psalms half-verse node's parallel_* values, skipping nodes with none."""
     F, L = api.F, api.L  # noqa: N806
     book_node = psalms_book_node(api)
 
     values: dict[int, dict[str, str]] = {}
     for chapter_node in L.d(book_node, otype="chapter"):
-        for colon_node in L.d(chapter_node, otype="half_verse"):
-            group_id = F.parallel_group_id.v(colon_node)
+        for half_verse_node in L.d(chapter_node, otype="half_verse"):
+            group_id = F.parallel_group_id.v(half_verse_node)
             if group_id is None:
                 continue
-            values[colon_node] = {
+            values[half_verse_node] = {
                 "parallel_group_id": group_id,
-                "parallel_member_id": F.parallel_member_id.v(colon_node),
-                "parallel_type": F.parallel_type.v(colon_node),
-                "parallel_group": F.parallel_group.v(colon_node),
-                "parallel_member": F.parallel_member.v(colon_node),
-                "parallel_signature": F.parallel_signature.v(colon_node),
-                "parallel_ambiguous": F.parallel_ambiguous.v(colon_node),
+                "parallel_member_id": F.parallel_member_id.v(half_verse_node),
+                "parallel_type": F.parallel_type.v(half_verse_node),
+                "parallel_group": F.parallel_group.v(half_verse_node),
+                "parallel_member": F.parallel_member.v(half_verse_node),
+                "parallel_signature": F.parallel_signature.v(half_verse_node),
+                "parallel_ambiguous": F.parallel_ambiguous.v(half_verse_node),
             }
     return values
 
 
 @dataclass(frozen=True, slots=True)
 class ReconstructedGroup:
+    """One parallelism group rebuilt from BHSA's per-node annotation features."""
+
     group_range: str
     parallelism_type: str
     signature: str

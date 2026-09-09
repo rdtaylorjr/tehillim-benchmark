@@ -1,0 +1,29 @@
+"""Symbols vulture cannot see used: result-record fields and the unwired sparse evaluation paths."""
+
+from genre import evaluate as genre_evaluate
+from genre.scripts import compare_by_genre, compare_calibrated
+from library import ap_gap_auc_bootstrap
+from parallelism import separation
+from parallelism.scripts import compare_baseline
+
+#: Serialized into result rows rather than read in process, so no call site references them.
+ap_gap_auc_bootstrap.BootstrapResult.ap_ci_low_pct
+ap_gap_auc_bootstrap.BootstrapResult.ap_ci_high_pct
+ap_gap_auc_bootstrap.BootstrapResult.gap_ci_low
+ap_gap_auc_bootstrap.BootstrapResult.gap_ci_high
+ap_gap_auc_bootstrap.BootstrapResult.gap_ci_low_pct
+ap_gap_auc_bootstrap.BootstrapResult.gap_ci_high_pct
+ap_gap_auc_bootstrap.BootstrapResult.auc_ci_low_pct
+ap_gap_auc_bootstrap.BootstrapResult.auc_ci_high_pct
+ap_gap_auc_bootstrap.BootstrapResult.n_valid_resamples
+ap_gap_auc_bootstrap.BootstrapResult.n_valid_jackknife
+separation.SeparationResult.n_positive
+separation.SeparationResult.n_negative
+compare_calibrated.mean_same_genre_similarity
+compare_calibrated.mean_different_genre_similarity
+compare_baseline.mean_true_similarity
+compare_baseline.mean_baseline_similarity
+
+#: Psalm centroids are small once pooled, so the genre scripts compare them densely.
+genre_evaluate.evaluate_genre_discrimination_sparse
+compare_by_genre.compare_model_across_genres_sparse

@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import precision_recall_curve, roc_curve
 
-# Canonical scholarly ordering, matching the fixed order already used in tehillim-ui's own
-# genre-tab section-note, not alphabetical, so every parallelism view orders types the same way.
+# Canonical scholarly ordering, matching tehillim-ui's genre-tab section-note, not alphabetical.
 _PARALLELISM_TYPE_ORDER = ["Synonymous", "Antithetic", "Synthetic", "Emblematic", "Staircase"]
 
 
@@ -16,7 +15,7 @@ def raincloud_group(values: pd.Series) -> dict[str, Any]:
     arr = values.to_numpy()
     return {
         "values": [round(float(v), 4) for v in arr],
-        "n": int(len(arr)),
+        "n": len(arr),
         "mean": round(float(arr.mean()), 4),
     }
 
@@ -36,9 +35,11 @@ def roc_pr_series(name: str, labels: np.ndarray, scores: np.ndarray, n: int) -> 
     }
 
 
-def genre_mean_matrix(df: pd.DataFrame, value_col: str, genres: list[str]) -> list[dict[str, Any]]:
+def genre_mean_matrix(
+    pair_df: pd.DataFrame, value_col: str, genres: list[str]
+) -> list[dict[str, Any]]:
     """Mean value_col for every (genre_a, genre_b) cell, averaged over both orderings."""
-    means = df.groupby(["genre_a", "genre_b"])[value_col].mean()
+    means = pair_df.groupby(["genre_a", "genre_b"])[value_col].mean()
     cells = []
     for ga in genres:
         for gb in genres:
@@ -51,7 +52,7 @@ def genre_mean_matrix(df: pd.DataFrame, value_col: str, genres: list[str]) -> li
     return cells
 
 
-def heatmap_cells(df: pd.DataFrame, value_col: str) -> list[dict[str, Any]]:
+def heatmap_cells(pair_df: pd.DataFrame, value_col: str) -> list[dict[str, Any]]:
     """One cell per row: the pair's psalm ids and its rounded value."""
     return [
         {
@@ -59,7 +60,7 @@ def heatmap_cells(df: pd.DataFrame, value_col: str) -> list[dict[str, Any]]:
             "psalm_b": int(row.psalm_b),
             "value": round(float(getattr(row, value_col)), 4),
         }
-        for row in df.itertuples()
+        for row in pair_df.itertuples()
     ]
 
 
@@ -84,9 +85,13 @@ def order_psalms_by_own_stat(
     return [{"psalm": p, "genre": genre_by_psalm[p]} for p in psalms_sorted]
 
 
-def load_auc_ap_ci(df: pd.DataFrame, model: str, scope: str | None) -> dict[str, Any] | None:
-    """Reads the already-bootstrapped AUC/AP point estimate and BCa CI, or None if absent."""
-    row = df[df.model == model] if scope is None else df[(df.model == model) & (df.scope == scope)]
+def auc_ap_ci_for(ci_df: pd.DataFrame, model: str, scope: str | None) -> dict[str, Any] | None:
+    """The already-bootstrapped AUC/AP estimate and BCa CI for one model, or None if absent."""
+    row = (
+        ci_df[ci_df.model == model]
+        if scope is None
+        else ci_df[(ci_df.model == model) & (ci_df.scope == scope)]
+    )
     if row.empty:
         return None
     row = row.iloc[0]
@@ -100,11 +105,11 @@ def load_auc_ap_ci(df: pd.DataFrame, model: str, scope: str | None) -> dict[str,
     }
 
 
-def load_validated_gap_stats(
-    df: pd.DataFrame, model: str, metric: str
+def validated_gap_stats_for(
+    validation_df: pd.DataFrame, model: str, metric: str
 ) -> dict[str, dict[str, float]] | None:
-    """Reads the already-permutation-tested gap/p/effect_size for one model+metric row, or None."""
-    row = df[(df.model == model) & (df.metric == metric)]
+    """The already-tested gap, p and effect size for one model and metric, or None."""
+    row = validation_df[(validation_df.model == model) & (validation_df.metric == metric)]
     if row.empty:
         return None
     row = row.iloc[0]
@@ -167,6 +172,46 @@ def build_parallelism_detail(
     }
 
 
+def _same_genre_scores(genre_pair_df: "pd.DataFrame", genre: str) -> "pd.Series":
+    """Calibrated scores of pairs where both psalms carry the given genre."""
+    return genre_pair_df[(genre_pair_df.genre_a == genre) & genre_pair_df.same_genre].calibrated_z
+
+
+def _genre_by_psalm_from_pairs(genre_pair_df: "pd.DataFrame") -> dict[int, str]:
+    """Rebuilds each psalm's genre from the pair table, where it appears on either side."""
+    sides = [
+        genre_pair_df[["psalm_a", "genre_a"]].rename(
+            columns={"psalm_a": "psalm", "genre_a": "genre"}
+        ),
+        genre_pair_df[["psalm_b", "genre_b"]].rename(
+            columns={"psalm_b": "psalm", "genre_b": "genre"}
+        ),
+    ]
+    return dict(pd.concat(sides).drop_duplicates("psalm").set_index("psalm")["genre"])
+
+
+def _raincloud_groups(
+    genre_pair_df: "pd.DataFrame", observed_genres: list[str]
+) -> list[dict[str, Any]]:
+    """The different-genre baseline, the combined same-genre group, then one group per genre."""
+    groups = [
+        {
+            "key": "different",
+            "label": "Different genre",
+            **raincloud_group(genre_pair_df[~genre_pair_df.same_genre].calibrated_z),
+        },
+        {
+            "key": "combined",
+            "label": "Same genre (combined)",
+            **raincloud_group(genre_pair_df[genre_pair_df.same_genre].calibrated_z),
+        },
+    ]
+    return groups + [
+        {"key": g, "label": g, **raincloud_group(_same_genre_scores(genre_pair_df, g))}
+        for g in observed_genres
+    ]
+
+
 def build_genre_detail(
     genre_pair_df: pd.DataFrame,
     genres: list[str],
@@ -183,61 +228,17 @@ def build_genre_detail(
         scores = np.concatenate([positive_scores, different_scores])
         return roc_pr_series(name, labels, scores, len(positive_scores))
 
-    genre_by_psalm = dict(
-        pd.concat(
-            [
-                genre_pair_df[["psalm_a", "genre_a"]].rename(
-                    columns={"psalm_a": "psalm", "genre_a": "genre"}
-                ),
-                genre_pair_df[["psalm_b", "genre_b"]].rename(
-                    columns={"psalm_b": "psalm", "genre_b": "genre"}
-                ),
-            ]
-        )
-        .drop_duplicates("psalm")
-        .set_index("psalm")["genre"]
-    )
+    genre_by_psalm = _genre_by_psalm_from_pairs(genre_pair_df)
 
     return {
         "genre_order": order_psalms_by_own_stat(
             genre_pair_df[genre_pair_df.same_genre], "calibrated_z", genre_by_psalm
         ),
-        "raincloud_groups": [
-            {
-                "key": "different",
-                "label": "Different genre",
-                **raincloud_group(genre_pair_df[~genre_pair_df.same_genre].calibrated_z),
-            },
-            {
-                "key": "combined",
-                "label": "Same genre (combined)",
-                **raincloud_group(genre_pair_df[genre_pair_df.same_genre].calibrated_z),
-            },
-        ]
-        + [
-            {
-                "key": g,
-                "label": g,
-                **raincloud_group(
-                    genre_pair_df[
-                        (genre_pair_df.genre_a == g) & genre_pair_df.same_genre
-                    ].calibrated_z
-                ),
-            }
-            for g in observed_genres
-        ],
+        "raincloud_groups": _raincloud_groups(genre_pair_df, observed_genres),
         "series": [
             series_for(genre_pair_df[genre_pair_df.same_genre].calibrated_z.to_numpy(), "Combined")
         ]
-        + [
-            series_for(
-                genre_pair_df[
-                    (genre_pair_df.genre_a == g) & genre_pair_df.same_genre
-                ].calibrated_z.to_numpy(),
-                g,
-            )
-            for g in observed_genres
-        ],
+        + [series_for(_same_genre_scores(genre_pair_df, g).to_numpy(), g) for g in observed_genres],
         "heatmap": heatmap_cells(genre_pair_df.assign(value=genre_pair_df.calibrated_z), "value"),
         "heatmap_genre_mean": genre_mean_matrix(genre_pair_df, "calibrated_z", genres),
         "auc_ap_stats": auc_ap_stats,

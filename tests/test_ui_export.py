@@ -2,6 +2,7 @@ import json
 
 import pandas as pd
 
+from library.rows_output import json_safe
 from ui_export import export
 from ui_export.export import build_domain_data
 
@@ -196,7 +197,7 @@ def test_build_domain_data_selects_parallelism_by_type_columns() -> None:
 
 
 def test_build_domain_data_drops_psalm_level_models_from_parallelism_overall() -> None:
-    """Psalm-broadcast representations are architecturally degenerate for a colon-pair task."""
+    """Psalm-broadcast representations are architecturally degenerate for a half-verse-pair task."""
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
@@ -331,8 +332,7 @@ def test_build_domain_data_selects_genre_by_genre_columns() -> None:
 
 
 def test_build_domain_data_derives_model_base_and_text_variant_for_genre_by_genre() -> None:
-    """genre_by_genre.csv has no model_base/text_variant columns, so the Text filter needs them
-    derived from `model`, or selecting a text tier silently drops every by-genre row (the bug)."""
+    """genre_by_genre.csv has no model_base/text_variant columns."""
     genre_by_genre = _genre_by_genre_df()
     genre_by_genre.loc[0, "model"] = "word_consonantal_binary"
     data = build_domain_data(
@@ -456,8 +456,13 @@ def test_build_domain_data_drops_shuffle_control_models_from_every_table() -> No
         "n_same_genre": 200,
         "n_different_genre": 1900,
     }
-    trajectory_rows = _trajectory_rows() + [
-        {"model": "phrase_signature_1_2gram_shuffle03", "metric": "content_distance", "raw_p": 0.9}
+    trajectory_rows = [
+        *_trajectory_rows(),
+        {
+            "model": "phrase_signature_1_2gram_shuffle03",
+            "metric": "content_distance",
+            "raw_p": 0.9,
+        },
     ]
     trajectory_by_genre_rows = [
         {
@@ -491,22 +496,22 @@ def test_build_domain_data_drops_shuffle_control_models_from_every_table() -> No
 def test_json_safe_replaces_non_finite_floats_with_none() -> None:
     """NaN and infinities are legal Python but not legal JSON, so they become null."""
     payload = {"gap": float("nan"), "hi": float("inf"), "lo": float("-inf"), "ok": 0.5}
-    assert export.json_safe(payload) == {"gap": None, "hi": None, "lo": None, "ok": 0.5}
+    assert json_safe(payload) == {"gap": None, "hi": None, "lo": None, "ok": 0.5}
 
 
 def test_json_safe_walks_nested_lists_and_dicts() -> None:
     payload = {"rows": [{"p": float("nan")}, {"p": 0.25}]}
-    assert export.json_safe(payload) == {"rows": [{"p": None}, {"p": 0.25}]}
+    assert json_safe(payload) == {"rows": [{"p": None}, {"p": 0.25}]}
 
 
 def test_json_safe_leaves_other_values_untouched() -> None:
     payload = {"model": "alephbert", "n": 1110, "flag": True, "missing": None}
-    assert export.json_safe(payload) == payload
+    assert json_safe(payload) == payload
 
 
 def test_exported_payload_is_strict_json() -> None:
     """allow_nan=False is the guard: a stray non-finite value fails the export loudly."""
-    payload = export.json_safe({"a": float("nan")})
+    payload = json_safe({"a": float("nan")})
     assert json.dumps(payload, allow_nan=False) == '{"a": null}'
 
 
@@ -530,12 +535,14 @@ def test_split_payloads_separates_the_per_genre_trajectory_rows() -> None:
 
 
 def test_split_payloads_yields_no_slices_when_there_are_no_by_genre_rows() -> None:
-    core, slices = export.split_payloads("syntax", {"genre_overall": [], "trajectory_by_genre": []})
+    core, slices = export.split_payloads(
+        "syntactic", {"genre_overall": [], "trajectory_by_genre": []}
+    )
     assert slices == {}
-    assert core["syntax"]["genre_overall"] == []
+    assert core["syntactic"]["genre_overall"] == []
 
 
 def test_split_payloads_leaves_a_payload_without_the_section_alone() -> None:
-    core, slices = export.split_payloads("syntax", {"genre_overall": []})
-    assert core == {"syntax": {"genre_overall": []}}
+    core, slices = export.split_payloads("syntactic", {"genre_overall": []})
+    assert core == {"syntactic": {"genre_overall": []}}
     assert slices == {}

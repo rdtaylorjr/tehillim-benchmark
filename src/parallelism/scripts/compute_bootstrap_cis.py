@@ -1,73 +1,120 @@
 """Psalm-clustered BCa bootstrap 95% CIs for AP (primary), gap, and AUC, every model x scope."""
 
 import argparse
-import csv
-import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
+from library.ap_gap_auc_bootstrap import ci_row
 from library.bhsa import (
-    DEFAULT_CHECKOUT,
-    list_psalms_cola_by_psalm,
-    list_psalms_colon_nodes,
+    list_psalms_half_verse_nodes,
+    list_psalms_half_verses_by_psalm,
     node_to_psalm_map,
 )
-from library.calibration import background_similarity_stats
-from library.embeddings import dataset_identifier, load_embeddings
-from library.incremental_cache import load_cached_rows
-from parallelism.baseline import build_unmarked_bicola
-from parallelism.bootstrap import BootstrapCI, block_bootstrap_ap_gap_and_auc
-from parallelism.pairs import RetrievalPair, build_retrieval_pairs, filter_pairs_by_type
-from parallelism.scripts.compare_baseline import (
+from library.calibration import background_similarity_stats, background_similarity_stats_sparse
+from library.cli import add_embeddings_dir_argument, add_scoring_arguments, resume_from_cache
+from library.embeddings import (
+    dataset_identifier,
+    is_sparse_embeddings,
+    load_embeddings,
+    load_sparse_embeddings,
+)
+from library.rows_output import write_rows_csv
+from library.scoring import skipping_unscorable
+from library.worker_pool import map_in_order
+from parallelism.baseline import build_unmarked_half_verse_pairs
+from parallelism.bootstrap import (
+    block_bootstrap_ap_gap_and_auc,
+    block_bootstrap_ap_gap_and_auc_from_similarities,
+)
+from parallelism.node_pairs import (
     NodePairs,
     as_node_pairs,
     filter_node_pairs_with_vectors,
+    pair_similarities_sparse,
+    retrieval_pairs_as_node_pairs,
 )
+from parallelism.pairs import build_retrieval_pairs, filter_pairs_by_type
 from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups
 
 _TYPES = ("Antithetic", "Emblematic", "Staircase", "Synonymous", "Synthetic")
 
 
-def _as_node_pairs(pairs: list[RetrievalPair]) -> NodePairs:
-    return [(p.source_nodes, p.target_nodes) for p in pairs]
+def score_model(
+    path: Path,
+    scopes: dict[str, NodePairs],
+    baseline_pairs: NodePairs,
+    background_node_ids: list[int],
+    node_to_psalm: dict[int, int],
+    n_resamples: int,
+    seed: int,
+) -> list[dict[str, str | int | float]]:
+    """One row per scope for one model file, scored independently of every other model."""
+    model = dataset_identifier(path)
+    rng = np.random.default_rng(seed)
+    rows = []
+    if is_sparse_embeddings(path):
+        node_ids, matrix = load_sparse_embeddings(path)
+        node_index = {n: i for i, n in enumerate(node_ids)}
+        background_rows = [node_index[n] for n in background_node_ids if n in node_index]
+        background = background_similarity_stats_sparse(matrix[background_rows])
+        model_baseline_pairs = filter_node_pairs_with_vectors(baseline_pairs, node_index)
+        baseline_sims = pair_similarities_sparse(model_baseline_pairs, node_ids, matrix)
+        for scope_name, true_pairs in scopes.items():
+            model_true_pairs = filter_node_pairs_with_vectors(true_pairs, node_index)
+            #: A type this corpus never annotates is an absent scope, not a model that failed.
+            if not model_true_pairs:
+                continue
+            result = block_bootstrap_ap_gap_and_auc_from_similarities(
+                model_true_pairs,
+                model_baseline_pairs,
+                pair_similarities_sparse(model_true_pairs, node_ids, matrix),
+                baseline_sims,
+                background,
+                node_to_psalm,
+                n_resamples=n_resamples,
+                rng=rng,
+            )
+            rows.append(ci_row(model, result, scope=scope_name))
+        return rows
+
+    node_vectors = load_embeddings(path)
+    background_vecs = np.stack([node_vectors[n] for n in background_node_ids if n in node_vectors])
+    background = background_similarity_stats(background_vecs)
+    model_baseline_pairs = filter_node_pairs_with_vectors(baseline_pairs, node_vectors)
+    for scope_name, true_pairs in scopes.items():
+        model_true_pairs = filter_node_pairs_with_vectors(true_pairs, node_vectors)
+        #: A type this corpus never annotates is an absent scope, not a model that failed.
+        if not model_true_pairs:
+            continue
+        result = block_bootstrap_ap_gap_and_auc(
+            model_true_pairs,
+            model_baseline_pairs,
+            node_vectors,
+            background,
+            node_to_psalm,
+            n_resamples=n_resamples,
+            rng=rng,
+        )
+        rows.append(ci_row(model, result, scope=scope_name))
+    return rows
 
 
-def _row(model: str, scope: str, result: BootstrapCI) -> dict[str, str | int | float]:
-    return {
-        "model": model,
-        "scope": scope,
-        "prevalence": result.prevalence,
-        "point_ap": result.point_ap,
-        "ap_ci_low": result.ap_ci_low,
-        "ap_ci_high": result.ap_ci_high,
-        "ap_ci_low_pct": result.ap_ci_low_pct,
-        "ap_ci_high_pct": result.ap_ci_high_pct,
-        "point_gap": result.point_gap,
-        "gap_ci_low": result.gap_ci_low,
-        "gap_ci_high": result.gap_ci_high,
-        "gap_ci_low_pct": result.gap_ci_low_pct,
-        "gap_ci_high_pct": result.gap_ci_high_pct,
-        "point_auc": result.point_auc,
-        "auc_ci_low": result.auc_ci_low,
-        "auc_ci_high": result.auc_ci_high,
-        "auc_ci_low_pct": result.auc_ci_low_pct,
-        "auc_ci_high_pct": result.auc_ci_high_pct,
-        "n_valid_resamples": result.n_valid_resamples,
-        "n_valid_jackknife": result.n_valid_jackknife,
-    }
-
-
-def main() -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_factory: Callable[[str], Any] = load_api,
+) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("embeddings_dir", type=Path)
-    parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA/module checkout spec")
-    parser.add_argument("--n-resamples", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--output", type=Path, default=None)
-    args = parser.parse_args()
+    add_embeddings_dir_argument(parser)
+    add_scoring_arguments(parser, with_seed=True, with_resamples=True)
+    args = parser.parse_args(argv)
 
-    api = load_api(args.checkout)
+    api = api_factory(args.checkout)
     node_values = read_node_feature_values(api)
     groups = reconstruct_groups(node_values)
     all_pairs = build_retrieval_pairs(groups)
@@ -75,45 +122,33 @@ def main() -> None:
     marked_nodes = {n for p in all_pairs for n in p.source_nodes} | {
         n for p in all_pairs for n in p.target_nodes
     }
-    cola_by_psalm = list_psalms_cola_by_psalm(api)
-    baseline_pairs = as_node_pairs(build_unmarked_bicola(cola_by_psalm, marked_nodes))
-    background_node_ids = [n for n in list_psalms_colon_nodes(api) if n not in marked_nodes]
-    node_to_psalm = node_to_psalm_map(cola_by_psalm)
+    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
+    baseline_pairs = as_node_pairs(
+        build_unmarked_half_verse_pairs(half_verses_by_psalm, marked_nodes)
+    )
+    background_node_ids = [n for n in list_psalms_half_verse_nodes(api) if n not in marked_nodes]
+    node_to_psalm = node_to_psalm_map(half_verses_by_psalm)
 
-    scopes: dict[str, NodePairs] = {"overall": _as_node_pairs(all_pairs)}
+    scopes: dict[str, NodePairs] = {"overall": retrieval_pairs_as_node_pairs(all_pairs)}
     for ptype in _TYPES:
-        scopes[ptype] = _as_node_pairs(filter_pairs_by_type(all_pairs, frozenset({ptype})))
-
-    rows, cached_models = load_cached_rows(args.output) if args.output else ([], set())
-    if cached_models:
-        print(f"reusing {len(cached_models)} cached models from {args.output}", file=sys.stderr)
-
-    model_paths = sorted(p for p in args.embeddings_dir.glob("**/*.parquet") if p.is_file())
-    for path in model_paths:
-        model = dataset_identifier(path)
-        if model in cached_models:
-            continue
-        print(f"processing {model}")
-        node_vectors = load_embeddings(path)
-        background_vecs = np.stack(
-            [node_vectors[n] for n in background_node_ids if n in node_vectors]
+        scopes[ptype] = retrieval_pairs_as_node_pairs(
+            filter_pairs_by_type(all_pairs, frozenset({ptype}))
         )
-        background = background_similarity_stats(background_vecs)
-        rng = np.random.default_rng(args.seed)
 
-        model_baseline_pairs = filter_node_pairs_with_vectors(baseline_pairs, node_vectors)
-        for scope_name, true_pairs in scopes.items():
-            model_true_pairs = filter_node_pairs_with_vectors(true_pairs, node_vectors)
-            result = block_bootstrap_ap_gap_and_auc(
-                model_true_pairs,
-                model_baseline_pairs,
-                node_vectors,
-                background,
-                node_to_psalm,
-                n_resamples=args.n_resamples,
-                rng=rng,
-            )
-            rows.append(_row(model, scope_name, result))
+    rows, model_paths = resume_from_cache(args.embeddings_dir, args.output)
+    score = partial(
+        score_model,
+        scopes=scopes,
+        baseline_pairs=baseline_pairs,
+        background_node_ids=background_node_ids,
+        node_to_psalm=node_to_psalm,
+        n_resamples=args.n_resamples,
+        seed=args.seed,
+    )
+    for model_rows in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+        if model_rows is None:
+            continue
+        rows.extend(model_rows)
 
     for row in rows:
         print(
@@ -124,11 +159,7 @@ def main() -> None:
         )
 
     if args.output:
-        fieldnames = list(dict.fromkeys(key for row in rows for key in row))
-        with open(args.output, "w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
+        write_rows_csv(args.output, rows)
 
 
 if __name__ == "__main__":

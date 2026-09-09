@@ -1,8 +1,8 @@
 [project]
-name = "tehillim-benchmarks"
-version = "0.5.0"
+name = "tehillim-benchmark"
+version = "0.6.0"
 description = "Evaluates embedding models against Psalms parallelism and genre benchmarks."
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
     "text-fabric[github]>=13.1.0",
@@ -20,37 +20,104 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    "vulture>=2.11",
+    "deptry>=0.16",
 ]
+
+[tool.deptry]
+known_first_party = ["genre", "library", "parallelism", "trajectory", "ui_export", "tools"]
+
+[tool.deptry.per_rule_ignores]
+# Tools CI invokes, so none of them is ever imported by this package.
+DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+#: tools/ is importable only when installed, so the pytest console script resolves it like src/.
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["genre*", "library*", "parallelism*", "trajectory*", "ui_export*", "tools*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+# Everything ruff implements, minus the families below, each excluded for a stated reason.
+# Matches tehillim-embeddings and tehillim-clustering so one convention covers all three.
+select = ["ALL"]
+ignore = [
+    # The one-line docstring convention these repos use conflicts with pydocstyle's
+    # multi-line summary, blank-line, and imperative-mood rules.
+    "D203", "D205", "D212", "D400", "D401", "D415",
+    # Positional booleans are readable in the signatures that use them.
+    "FBT001", "FBT002",
+    # Copyright headers are not used in these repos.
+    "CPY001",
+    # assert is how pytest expresses expectations.
+    "S101",
+    # Comment formatting: the `#:` prefix marks provenance notes throughout.
+    "E265",
+    # Conflicts with the formatter, which owns trailing commas.
+    "COM812",
+    # Heavy optional imports are deliberately deferred into functions.
+    "PLC0415",
+    # Detailed, self-contained error messages are preferred over terse ones.
+    "TRY003", "EM101", "EM102",
+    # Moving runtime-needed names into TYPE_CHECKING breaks dataclass field resolution.
+    "TC001", "TC002", "TC003",
+    # The small integers flagged are n-gram orders and pair counts, named by their context.
+    "PLR2004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# A vulture whitelist is by format a list of bare attribute expressions.
+".vulture-whitelist.py" = ["B018", "INP001"]
+# Test names and bodies are the documentation; annotating every fixture adds noise, not signal.
+"tests/**" = ["ANN", "D10", "PLR2004", "S", "SLF001", "ARG", "INP001", "PLR0913", "PLR0917"]
+# A script's stdout is its interface.
+"src/*/scripts/*" = ["T201"]
+# The skip policy and the cache report on the batch scripts' behalf, and stderr is that interface.
+"src/library/scoring.py" = ["T201"]
+"src/library/cli.py" = ["T201"]
+# Reports a genre it could not build a CI for, on the batch script's behalf.
+"src/genre/across_genres.py" = ["T201"]
+"src/parallelism/evaluate.py" = ["T201"]
+"src/ui_export/export.py" = ["T201"]
+"src/library/rows_output.py" = ["ANN401"]  # json_safe walks arbitrary JSON
+"tools/*" = ["T201"]
+# Text-Fabric exposes runtime-named features, so Any is the accurate annotation, not a weak one.
+"src/library/bhsa.py" = ["ANN401"]
+"src/parallelism/tf_features.py" = ["ANN401"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 8
 
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true
+strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--cov=src", "--cov-report=term-missing"]
+addopts = ["--cov=src", "--cov-report=term-missing", "--cov-fail-under=95"]
+# A numpy or scipy warning means a statistic silently degenerated, so it fails the build.
+filterwarnings = ["error"]
+markers = [
+    "integration: reads a local tehillim-embeddings checkout (see TEHILLIM_EMBEDDINGS_DATA)",
+]
 
 [tool.coverage.run]
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 95
+#: main() is CLI wiring under test like any other code, so only unreachable lines are excluded.
 exclude_also = [
-    "^def main\\(\\) -> None:$",
     "^if __name__ == .__main__.:$",
     "^@numba.njit",
 ]

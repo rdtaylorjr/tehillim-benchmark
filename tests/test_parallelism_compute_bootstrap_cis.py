@@ -1,55 +1,116 @@
-from parallelism.bootstrap import BootstrapCI
-from parallelism.scripts.compute_bootstrap_cis import _row
+from pathlib import Path
+
+from parallelism.node_pairs import as_node_pairs
+from parallelism.scripts.compute_bootstrap_cis import score_model
+
+# Four psalms, one true and one baseline pair each, so leave-one-psalm-out still leaves three.
+_NODE_TO_PSALM_SPREAD = {
+    1: 1,
+    2: 1,
+    3: 2,
+    4: 2,
+    13: 3,
+    14: 3,
+    15: 4,
+    16: 4,
+    5: 1,
+    6: 1,
+    7: 2,
+    8: 2,
+    17: 3,
+    18: 3,
+    19: 4,
+    20: 4,
+    9: 1,
+    10: 2,
+    11: 3,
+    12: 4,
+}
+_VECTORS_SPREAD = {
+    1: [1.0, 0.0],
+    2: [1.0, 0.0],
+    3: [1.0, 0.0],
+    4: [0.98, 0.2],
+    13: [1.0, 0.0],
+    14: [0.99, 0.1],
+    15: [1.0, 0.0],
+    16: [0.97, 0.24],
+    5: [1.0, 0.0],
+    6: [0.0, 1.0],
+    7: [1.0, 0.0],
+    8: [0.1, 0.99],
+    17: [1.0, 0.0],
+    18: [0.2, 0.98],
+    19: [1.0, 0.0],
+    20: [0.3, 0.95],
+    9: [0.7, 0.71],
+    10: [-1.0, 0.0],
+    11: [0.0, 1.0],
+    12: [0.3, 0.95],
+}
 
 
-def _result(**overrides: float | int) -> BootstrapCI:
-    defaults: dict[str, float | int] = {
-        "point_ap": 0.8,
-        "ap_ci_low": 0.7,
-        "ap_ci_high": 0.9,
-        "ap_ci_low_pct": 0.71,
-        "ap_ci_high_pct": 0.89,
-        "point_gap": 0.3,
-        "gap_ci_low": 0.2,
-        "gap_ci_high": 0.4,
-        "gap_ci_low_pct": 0.21,
-        "gap_ci_high_pct": 0.39,
-        "point_auc": 0.75,
-        "auc_ci_low": 0.65,
-        "auc_ci_high": 0.85,
-        "auc_ci_low_pct": 0.66,
-        "auc_ci_high_pct": 0.84,
-        "prevalence": 0.14,
-        "n_valid_resamples": 950,
-        "n_valid_jackknife": 149,
-    }
-    defaults.update(overrides)
-    return BootstrapCI(**defaults)  # type: ignore[arg-type]
+def test_score_model_returns_one_row_per_scope(tmp_path: Path, write_embeddings_parquet) -> None:
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
+    )
+    true_pairs = as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])
+    scopes = {"overall": true_pairs, "Synonymous": true_pairs}
+
+    rows = score_model(
+        path,
+        scopes,
+        as_node_pairs([(5, 6), (7, 8), (17, 18), (19, 20)]),
+        [9, 10, 11, 12],
+        _NODE_TO_PSALM_SPREAD,
+        n_resamples=20,
+        seed=0,
+    )
+
+    assert [row["scope"] for row in rows] == ["overall", "Synonymous"]
+    assert {row["model"] for row in rows} == {"mine"}
 
 
-class TestRow:
-    def test_carries_the_model_and_scope_alongside_every_result_field(self) -> None:
-        row = _row("bge_m3", "overall", _result())
+def test_score_model_scopes_share_one_seeded_generator_so_reruns_repeat(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """Every scope of a model draws from one seeded stream, so a rerun reproduces it exactly."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
+    )
+    scopes = {"overall": as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])}
+    args = (
+        path,
+        scopes,
+        as_node_pairs([(5, 6), (7, 8), (17, 18), (19, 20)]),
+        [9, 10, 11, 12],
+        _NODE_TO_PSALM_SPREAD,
+    )
 
-        assert row["model"] == "bge_m3"
-        assert row["scope"] == "overall"
-        assert row["point_ap"] == 0.8
-        assert row["ap_ci_low"] == 0.7
-        assert row["ap_ci_high"] == 0.9
-        assert row["point_auc"] == 0.75
-        assert row["prevalence"] == 0.14
-        assert row["n_valid_resamples"] == 950
-        assert row["n_valid_jackknife"] == 149
+    first = score_model(*args, n_resamples=20, seed=0)
+    second = score_model(*args, n_resamples=20, seed=0)
 
-    def test_flattens_every_field_the_result_dataclass_carries(self) -> None:
-        row = _row("bge_m3", "overall", _result())
+    assert first == second
 
-        # "model" and "scope" plus all 18 BootstrapCI fields.
-        assert len(row) == 20
 
-    def test_different_scopes_produce_different_scope_values(self) -> None:
-        overall_row = _row("bge_m3", "overall", _result())
-        synonymous_row = _row("bge_m3", "Synonymous", _result())
+def test_score_model_passes_over_a_scope_the_corpus_has_no_pairs_for(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """A parallelism type nobody annotated is an absent scope, not a model that failed to score."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
+    )
+    true_pairs = as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])
+    scopes = {"overall": true_pairs, "Antithetic": as_node_pairs([])}
 
-        assert overall_row["scope"] == "overall"
-        assert synonymous_row["scope"] == "Synonymous"
+    rows = score_model(
+        path,
+        scopes,
+        as_node_pairs([(5, 6), (7, 8), (17, 18), (19, 20)]),
+        [9, 10, 11, 12],
+        _NODE_TO_PSALM_SPREAD,
+        n_resamples=20,
+        seed=0,
+    )
+
+    assert [row["scope"] for row in rows] == ["overall"]

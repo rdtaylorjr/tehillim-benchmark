@@ -5,10 +5,12 @@ import json
 import re
 from pathlib import Path
 
+from library.rows_output import write_text
+
 DomainData = dict[str, list[dict[str, object]]]
 Domains = dict[str, DomainData]
 
-ALL_DOMAIN_IDS = ("semantic", "lexical", "phonology", "morphology", "syntax", "discourse")
+ALL_DOMAIN_IDS = ("semantic", "lexical", "phonological", "morphological", "syntactic", "discourse")
 
 _EMPTY_DOMAIN_DATA: DomainData = {
     "parallelism_overall": [],
@@ -40,17 +42,18 @@ def build_ui_page_html(template: str, bundle_js: str, domains: Domains) -> str:
     return html.replace(_BUNDLE_MARKER, bundle_js)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("domain_json", type=Path, nargs="+")
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     domains = merge_domain_json_files(args.domain_json)
     html = build_ui_page_html(args.template.read_text(), args.bundle.read_text(), domains)
-    args.output.write_text(html)
+    write_text(args.output, html)
     print(f"wrote {args.output}")
 
 

@@ -7,8 +7,7 @@ from library.bootstrap_ci import bca_ci
 
 
 def test_bca_ci_reduces_to_percentile_when_unbiased_and_unaccelerated() -> None:
-    """z0=0 exactly (point sits at the median) and a=0 (constant jackknife) should reproduce
-    the plain percentile interval exactly."""
+    """With z0=0 and a=0 the interval must reproduce the plain percentile interval."""
     bootstrap_values = np.concatenate(
         [-np.arange(1, 5001, dtype=float), np.arange(1, 5001, dtype=float)]
     )

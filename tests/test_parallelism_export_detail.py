@@ -1,12 +1,16 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from library.calibration import BackgroundStats
+from parallelism.node_pairs import as_node_pairs
 from parallelism.pairs import RetrievalPair
 from parallelism.scripts.export_detail import (
     build_baseline_detail_rows,
     build_pair_detail_rows,
     build_type_vs_baseline_rows,
+    score_model,
 )
 
 
@@ -81,8 +85,7 @@ class TestBuildPairDetailRows:
         assert rows[0]["reciprocal_rank_backward"] == 1.0
 
     def test_ranks_a_worse_matching_pair_below_a_better_one(self) -> None:
-        # p1's source (node 1) is far closer to p2's target (node 4) than to its own target
-        # (node 2), so p1 should rank below the true match once both pairs compete.
+        # p1's source is closer to p2's target than to its own, so p1 ranks below the true match.
         pairs = [
             _pair("p1", "Synonymous", (1,), (2,)),
             _pair("p2", "Synonymous", (5,), (4,)),
@@ -172,3 +175,38 @@ class TestBuildTypeVsBaselineRows:
         assert overall["gap"] == pytest.approx(
             overall["true_effect_size"] - overall["baseline_effect_size"]
         )
+
+
+def test_score_model_returns_pair_baseline_and_type_scope_rows(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        {
+            1: [1.0, 0.0],
+            2: [1.0, 0.0],
+            3: [1.0, 0.0],
+            4: [0.98, 0.2],
+            5: [1.0, 0.0],
+            6: [0.0, 1.0],
+            7: [1.0, 0.0],
+            8: [0.1, 0.99],
+            9: [0.7, 0.71],
+            10: [-1.0, 0.0],
+            11: [0.0, 1.0],
+            12: [0.3, 0.95],
+        },
+    )
+    all_pairs = [
+        RetrievalPair("p1", "g", "Synonymous", "AB", (1,), (2,), "A", "B"),
+        RetrievalPair("p2", "g", "Synonymous", "AB", (3,), (4,), "A", "B"),
+    ]
+    baseline_raw = [(5, 6), (7, 8)]
+
+    pair_rows, baseline_rows, scope_rows = score_model(
+        path, all_pairs, as_node_pairs(baseline_raw), baseline_raw, [9, 10, 11, 12]
+    )
+
+    assert [row["pair_id"] for row in pair_rows] == ["p1", "p2"]
+    assert len(baseline_rows) == 2
+    assert {row["model"] for row in scope_rows} == {"mine"}

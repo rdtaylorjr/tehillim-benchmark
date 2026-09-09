@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 import scipy.sparse as sp
@@ -7,7 +9,7 @@ from genre.evaluate import (
     evaluate_genre_discrimination_from_matrix,
     evaluate_genre_discrimination_sparse,
 )
-from genre.pairs import GenrePair
+from genre.pairs import GenrePair, build_genre_pairs
 from library.retrieval_metrics import cosine_similarity_matrix
 
 
@@ -171,3 +173,133 @@ def test_skips_a_pair_whose_psalm_has_no_vector() -> None:
 
     assert report.n_same_genre == 1
     assert report.n_different_genre == 2
+
+
+def test_evaluate_genre_discrimination_sparse_agrees_with_dense_at_realistic_density() -> None:
+    """The exact-equality case has at most 5 nonzeros a row; dense rows agree only to float32."""
+    rng = np.random.default_rng(11)
+    dim = 512
+    psalm_ids = list(range(1, 13))
+    dense_vectors = {p: rng.standard_normal(dim) for p in psalm_ids}
+    pairs = [
+        GenrePair(
+            a, b, "Lament", "Lament" if (a + b) % 2 else "Praise", same_genre=(a + b) % 2 == 1
+        )
+        for a in psalm_ids
+        for b in psalm_ids
+        if a < b
+    ]
+    sparse_matrix = sp.csr_matrix(np.stack([dense_vectors[p] for p in psalm_ids]))
+
+    dense_report = evaluate_genre_discrimination(pairs, dense_vectors)
+    sparse_report = evaluate_genre_discrimination_sparse(pairs, psalm_ids, sparse_matrix)
+
+    assert sparse_report.n_same_genre == dense_report.n_same_genre
+    assert sparse_report.n_different_genre == dense_report.n_different_genre
+    assert sparse_report.average_precision == pytest.approx(
+        dense_report.average_precision, abs=1e-6
+    )
+    assert sparse_report.separation_auc == pytest.approx(dense_report.separation_auc, abs=1e-6)
+
+
+def test_reports_nan_when_a_representation_leaves_no_usable_pairs() -> None:
+    """Spacing features are all-zero for most word-level psalms, so a genre can lose every pair."""
+    report = evaluate_genre_discrimination([], {})
+
+    assert report.n_same_genre == 0
+    assert report.n_different_genre == 0
+    assert math.isnan(report.average_precision)
+    assert math.isnan(report.separation_auc)
+    assert math.isnan(report.separation_p)
+    assert math.isnan(report.prevalence)
+
+
+def test_reports_nan_when_one_side_of_the_comparison_is_empty() -> None:
+    """A genre whose psalms all survive but whose counterpart set is empty has no AUC to report."""
+    pairs = [GenrePair(psalm_a=1, psalm_b=2, genre_a="Hymn", genre_b="Hymn", same_genre=True)]
+    vectors = {1: np.array([1.0, 0.0]), 2: np.array([0.0, 1.0])}
+
+    report = evaluate_genre_discrimination(pairs, vectors)
+
+    assert report.n_same_genre == 1
+    assert report.n_different_genre == 0
+    assert math.isnan(report.separation_auc)
+
+
+def test_dense_and_matrix_entry_points_return_the_same_report_exactly() -> None:
+    """One metric must have one implementation, or the two routes drift at tie boundaries."""
+    from genre.bootstrap import psalm_similarity_matrix
+
+    rng = np.random.default_rng(5)
+    psalm_ids = list(range(1, 41))
+    vectors = {p: rng.standard_normal(64).astype(np.float32) for p in psalm_ids}
+    genres = {p: "A" if p % 3 else "B" for p in psalm_ids}
+    pairs = build_genre_pairs(genres)
+
+    dense = evaluate_genre_discrimination(pairs, vectors)
+    ordered = sorted(vectors)
+    from_matrix = evaluate_genre_discrimination_from_matrix(
+        pairs, psalm_similarity_matrix(ordered, vectors), {p: i for i, p in enumerate(ordered)}
+    )
+
+    assert dense == from_matrix
+
+
+def test_dense_entry_point_does_not_stack_one_row_per_pair() -> None:
+    """150 psalms make 11175 pairs, so stacking pair rows duplicates each vector 149 times."""
+    import tracemalloc
+
+    rng = np.random.default_rng(6)
+    psalm_ids = list(range(1, 151))
+    dim = 2048
+    vectors = {p: rng.standard_normal(dim).astype(np.float32) for p in psalm_ids}
+    genres = {p: "A" if p % 3 else "B" for p in psalm_ids}
+    pairs = build_genre_pairs(genres)
+    one_row_per_pair = len(pairs) * dim * 4
+
+    tracemalloc.start()
+    evaluate_genre_discrimination(pairs, vectors)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert peak < one_row_per_pair // 4, (
+        f"peak {peak} implies a per-pair stack of {one_row_per_pair}"
+    )
+
+
+def test_pair_similarities_reads_every_pair_off_one_psalm_matrix() -> None:
+    """The one place pair similarity is derived, so no caller stacks a row per pair again."""
+    from genre.evaluate import pair_similarities
+
+    rng = np.random.default_rng(9)
+    vectors = {p: rng.standard_normal(32).astype(np.float32) for p in range(1, 21)}
+    genres = {p: "A" if p % 2 else "B" for p in vectors}
+    pairs = build_genre_pairs(genres)
+
+    usable, similarities = pair_similarities(pairs, vectors)
+
+    assert len(usable) == len(pairs)
+    assert similarities.shape == (len(pairs),)
+    assert similarities.dtype == np.float64
+
+
+def test_pair_similarities_drops_pairs_whose_psalms_have_no_vector() -> None:
+    from genre.evaluate import pair_similarities
+
+    rng = np.random.default_rng(10)
+    vectors = {p: rng.standard_normal(16).astype(np.float32) for p in (1, 2, 3)}
+    pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
+
+    usable, similarities = pair_similarities(pairs, vectors)
+
+    assert all(p.psalm_a in vectors and p.psalm_b in vectors for p in usable)
+    assert len(similarities) == len(usable) == 3
+
+
+def test_pair_similarities_returns_empty_when_no_pair_is_usable() -> None:
+    from genre.evaluate import pair_similarities
+
+    usable, similarities = pair_similarities(build_genre_pairs({1: "A", 2: "B"}), {})
+
+    assert usable == []
+    assert similarities.shape == (0,)

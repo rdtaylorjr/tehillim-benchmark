@@ -12,7 +12,8 @@ def load_cached_rows(
     """Reads a prior output CSV's rows (optionally a column subset) and its covered model set."""
     if not cache_path.exists():
         return [], set()
-    cached_df = pd.read_csv(cache_path)
+    # round_trip so a cached row is rewritten with the exact bits the scoring run produced.
+    cached_df = pd.read_csv(cache_path, float_precision="round_trip")
     models = set(cached_df["model"].unique())
     if columns is not None:
         cached_df = cached_df[list(columns)]

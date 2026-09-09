@@ -5,15 +5,22 @@ import warnings
 import numpy as np
 from scipy.stats import norm
 
+from library.protocol import DEFAULT_ALPHA
+
 # Acceleration is a jackknife skewness estimate, undefined below two values, where BCa decays to BC.
 MIN_JACKKNIFE_FOR_ACCELERATION = 2
+# Below this spread every resample landed on one value, leaving no distribution to quantile.
+_ZERO_VARIANCE_RANGE = 1e-12
 
 
 def bca_ci(
-    point: float, bootstrap_values: np.ndarray, jackknife_values: np.ndarray, alpha: float = 0.05
+    point: float,
+    bootstrap_values: np.ndarray,
+    jackknife_values: np.ndarray,
+    alpha: float = DEFAULT_ALPHA,
 ) -> tuple[float, float]:
     """Efron (1987) BCa interval; falls back to the point itself for a zero-variance bootstrap."""
-    if np.ptp(bootstrap_values) < 1e-12:
+    if np.ptp(bootstrap_values) < _ZERO_VARIANCE_RANGE:
         return float(bootstrap_values[0]), float(bootstrap_values[0])
 
     n_boot = len(bootstrap_values)

@@ -1,13 +1,19 @@
-"""Measures whether true parallel cola are closer in embedding space than unrelated cola."""
+"""Measures whether true parallel half-verses are closer in embedding space than unrelated ones."""
 
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.stats import mannwhitneyu
 
+from library.errors import InsufficientDataError
+
+_MIN_PAIRS_FOR_SEPARATION = 2
+
 
 @dataclass(frozen=True, slots=True)
 class SeparationResult:
+    """AUC separating two score populations, with the counts it was computed from."""
+
     auc: float
     p_value: float
     n_positive: int
@@ -19,10 +25,14 @@ def similarity_separation(
 ) -> SeparationResult:
     """AUC of true-pair vs. other-pair similarity; row_mask restricts positives only."""
     n = similarity_matrix.shape[0]
+    if n < _MIN_PAIRS_FOR_SEPARATION:
+        raise InsufficientDataError(
+            f"separation AUC needs at least {_MIN_PAIRS_FOR_SEPARATION} pairs, got {n}"
+        )
     rows = np.arange(n) if row_mask is None else np.flatnonzero(row_mask)
     positive = similarity_matrix[rows, rows]
-    off_diagonal_by_row = similarity_matrix[~np.eye(n, dtype=bool)].reshape(n, n - 1)
-    negative = off_diagonal_by_row[rows].reshape(-1)
+    # Gathering only the masked rows keeps a per-type call off the full n x n off-diagonal copy.
+    negative = similarity_matrix[rows][~np.eye(n, dtype=bool)[rows]]
     statistic, p_value = mannwhitneyu(positive, negative, alternative="greater")
     auc = statistic / (len(positive) * len(negative))
     return SeparationResult(

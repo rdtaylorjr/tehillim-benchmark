@@ -2,11 +2,13 @@ import numpy as np
 import pytest
 
 from genre.bootstrap import (
-    _jackknife_ap_gap_and_auc,
+    _leave_one_out_splits,
+    _resample_split,
     _upper_triangle_same_and_different,
     block_bootstrap_genre_ap_gap_and_auc,
     build_similarity_and_genre_matrices,
 )
+from library.ap_gap_auc_bootstrap import jackknife_statistics
 from library.calibration import BackgroundStats
 
 
@@ -66,19 +68,39 @@ def test_block_bootstrap_ci_contains_the_point_estimate() -> None:
     assert result.prevalence == pytest.approx(7 / 15)
 
 
-def test_block_bootstrap_returns_nan_ci_when_too_few_psalms_for_a_valid_resample() -> None:
-    """With only 2 psalms, every resample yields at most 1 pair, never the >=2 needed per side."""
-    psalm_ids = [1, 2]
+def test_block_bootstrap_rejects_a_population_with_no_same_genre_pairs() -> None:
+    """2 psalms of different genres give 0 same-genre pairs, leaving AP and AUC undefined."""
     similarity_matrix = np.array([[1.0, 0.0], [0.0, 1.0]])
     genre_match_matrix = np.array([[True, False], [False, True]])
     background = BackgroundStats(mean=0.3, std=0.3, n_vectors=2)
-    rng = np.random.default_rng(0)
+
+    with pytest.raises(ValueError, match="at least 2 values on each side"):
+        block_bootstrap_genre_ap_gap_and_auc(
+            [1, 2],
+            similarity_matrix,
+            genre_match_matrix,
+            background,
+            n_resamples=20,
+            rng=np.random.default_rng(0),
+        )
+
+
+def test_block_bootstrap_returns_nan_ci_when_no_resample_is_drawn() -> None:
+    """The point estimate still stands when the scheme yields nothing to build a CI from."""
+    similarity_matrix, genre_match_matrix = _matrices()
+    background = BackgroundStats(mean=0.3, std=0.3, n_vectors=6)
 
     result = block_bootstrap_genre_ap_gap_and_auc(
-        psalm_ids, similarity_matrix, genre_match_matrix, background, n_resamples=20, rng=rng
+        [1, 2, 3, 4, 5, 6],
+        similarity_matrix,
+        genre_match_matrix,
+        background,
+        n_resamples=0,
+        rng=np.random.default_rng(0),
     )
 
     assert result.n_valid_resamples == 0
+    assert not np.isnan(result.point_ap)
     assert np.isnan(result.gap_ci_low)
     assert np.isnan(result.gap_ci_high)
 
@@ -91,7 +113,12 @@ def test_block_bootstrap_raises_a_clear_error_with_only_one_psalm() -> None:
 
     with pytest.raises(ValueError, match="no genre pairs"):
         block_bootstrap_genre_ap_gap_and_auc(
-            [1], similarity_matrix, genre_match_matrix, background, n_resamples=20
+            [1],
+            similarity_matrix,
+            genre_match_matrix,
+            background,
+            n_resamples=20,
+            rng=np.random.default_rng(0),
         )
 
 
@@ -123,7 +150,9 @@ def test_upper_triangle_population_mask_excludes_pairs_touching_neither_side() -
     # same: (0,1),(0,2),(1,2) = 3. different: A-vs-{B,C,D} = 3*3 = 9. Excludes B-C,B-D,C-D.
     assert len(same_sims) == 3
     assert len(different_sims) == 9
-    assert 0.50 not in different_sims and 0.60 not in different_sims and 0.70 not in different_sims
+    assert 0.50 not in different_sims
+    assert 0.60 not in different_sims
+    assert 0.70 not in different_sims
 
 
 def test_upper_triangle_without_population_mask_keeps_the_old_behavior() -> None:
@@ -139,10 +168,12 @@ def test_jackknife_with_population_mask_differs_from_unmasked() -> None:
     similarity_matrix, same_mask, population_mask = _one_vs_rest_fixture()
     background = BackgroundStats(mean=0.3, std=0.2, n_vectors=6)
 
-    masked_gaps = _jackknife_ap_gap_and_auc(
-        similarity_matrix, same_mask, background, population_mask=population_mask
+    masked_gaps = jackknife_statistics(
+        _leave_one_out_splits(6, similarity_matrix, same_mask, population_mask), background
     )[1]
-    unmasked_gaps = _jackknife_ap_gap_and_auc(similarity_matrix, same_mask, background)[1]
+    unmasked_gaps = jackknife_statistics(
+        _leave_one_out_splits(6, similarity_matrix, same_mask, None), background
+    )[1]
 
     assert not np.allclose(masked_gaps, unmasked_gaps, equal_nan=True)
     assert not np.isnan(masked_gaps).all()
@@ -197,8 +228,84 @@ def test_jackknife_returns_nan_when_removing_a_psalm_leaves_too_few_same_genre_p
     )
     background = BackgroundStats(mean=0.3, std=0.2, n_vectors=4)
 
-    aps, gaps, aucs = _jackknife_ap_gap_and_auc(similarity_matrix, genre_match_matrix, background)
+    aps, gaps, aucs = jackknife_statistics(
+        _leave_one_out_splits(4, similarity_matrix, genre_match_matrix, None), background
+    )
 
     assert np.isnan(aps).all()
     assert np.isnan(gaps).all()
     assert np.isnan(aucs).all()
+
+
+def test_resample_split_excludes_pairs_of_a_psalm_with_its_own_duplicate() -> None:
+    """A psalm paired with its own copy would inject self-similarity 1.0 as a positive."""
+    similarity_matrix = np.array([[1.0, 0.4], [0.4, 1.0]])
+    genre_match_matrix = np.array([[True, True], [True, True]])
+
+    same_sims, different_sims = _resample_split(
+        np.array([0, 0, 1]), similarity_matrix, genre_match_matrix, None
+    )
+
+    assert sorted(same_sims.tolist()) == [0.4, 0.4]
+    assert len(different_sims) == 0
+
+
+def test_resample_split_keeps_repeated_pairs_between_two_distinct_psalms() -> None:
+    """Only a psalm paired with itself is dropped; a genuine pair drawn twice still counts twice."""
+    similarity_matrix = np.array([[1.0, 0.4], [0.4, 1.0]])
+    genre_match_matrix = np.array([[True, False], [False, True]])
+
+    same_sims, different_sims = _resample_split(
+        np.array([0, 1, 0, 1]), similarity_matrix, genre_match_matrix, None
+    )
+
+    assert len(same_sims) == 0
+    assert different_sims.tolist() == [0.4, 0.4, 0.4, 0.4]
+
+
+def _tied_similarity_fixture() -> tuple[np.ndarray, np.ndarray]:
+    """8 psalms, 4 per genre, every off-diagonal similarity tied, so there is no real signal."""
+    n = 8
+    similarity_matrix = np.full((n, n), 0.4)
+    np.fill_diagonal(similarity_matrix, 1.0)
+    genres = np.array(["A"] * 4 + ["B"] * 4)
+    return similarity_matrix, genres[:, None] == genres[None, :]
+
+
+def test_bootstrap_of_a_zero_signal_matrix_never_ranks_same_genre_above_chance() -> None:
+    """Duplicate-psalm self-pairs used to inject similarity-1.0 positives and invent an AUC gap."""
+    similarity_matrix, genre_match_matrix = _tied_similarity_fixture()
+    background = BackgroundStats(mean=0.3, std=0.2, n_vectors=8)
+
+    result = block_bootstrap_genre_ap_gap_and_auc(
+        list(range(8)),
+        similarity_matrix,
+        genre_match_matrix,
+        background,
+        n_resamples=300,
+        rng=np.random.default_rng(0),
+    )
+
+    assert result.point_auc == pytest.approx(0.5)
+    assert result.auc_ci_low_pct == pytest.approx(0.5)
+    assert result.auc_ci_high_pct == pytest.approx(0.5)
+    assert result.auc_ci_low <= result.point_auc <= result.auc_ci_high
+
+
+def test_bootstrap_of_a_zero_signal_matrix_keeps_the_calibrated_gap_at_zero() -> None:
+    """Same-genre and different-genre means are tied here, so every resample gap is exactly 0."""
+    similarity_matrix, genre_match_matrix = _tied_similarity_fixture()
+    background = BackgroundStats(mean=0.3, std=0.2, n_vectors=8)
+
+    result = block_bootstrap_genre_ap_gap_and_auc(
+        list(range(8)),
+        similarity_matrix,
+        genre_match_matrix,
+        background,
+        n_resamples=300,
+        rng=np.random.default_rng(0),
+    )
+
+    assert result.point_gap == pytest.approx(0.0)
+    assert result.gap_ci_low_pct == pytest.approx(0.0)
+    assert result.gap_ci_high_pct == pytest.approx(0.0)

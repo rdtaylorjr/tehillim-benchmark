@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from library.embeddings import split_model_name
+from library.rows_output import write_json
 
 _PARALLELISM_OVERALL_COLUMNS = [
     "model",
@@ -73,14 +73,14 @@ _PSALM_LEVEL_MODEL = r"_psalm(?:_shuffle\d+)?$"
 _SHUFFLE_CONTROL_MODEL = r"_shuffle\d+"
 
 
-def _drop_psalm_level_models(df: pd.DataFrame) -> pd.DataFrame:
-    """Excludes _psalm[_shuffleNN]-suffixed models: degenerate for a colon-pair task."""
-    return df[~df["model"].str.contains(_PSALM_LEVEL_MODEL, regex=True)]
+def _drop_psalm_level_models(models_df: pd.DataFrame) -> pd.DataFrame:
+    """Excludes _psalm[_shuffleNN]-suffixed models: degenerate for a half-verse-pair task."""
+    return models_df[~models_df["model"].str.contains(_PSALM_LEVEL_MODEL, regex=True)]
 
 
-def _drop_shuffle_control_models(df: pd.DataFrame) -> pd.DataFrame:
+def _drop_shuffle_control_models(models_df: pd.DataFrame) -> pd.DataFrame:
     """Excludes _shuffleNN models: a null-order control checked against one model, not rankable."""
-    return df[~df["model"].str.contains(_SHUFFLE_CONTROL_MODEL, regex=True)]
+    return models_df[~models_df["model"].str.contains(_SHUFFLE_CONTROL_MODEL, regex=True)]
 
 
 def _drop_shuffle_control_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -88,13 +88,13 @@ def _drop_shuffle_control_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any
     return [row for row in rows if not re.search(_SHUFFLE_CONTROL_MODEL, row.get("model", ""))]
 
 
-def _add_model_base_and_text_variant(df: pd.DataFrame) -> pd.DataFrame:
+def _add_model_base_and_text_variant(models_df: pd.DataFrame) -> pd.DataFrame:
     """Derives model_base/text_variant from `model`, for tables that don't already carry them."""
-    df = df.copy()
-    split = [split_model_name(model) for model in df["model"]]
-    df["model_base"] = [base for base, _ in split]
-    df["text_variant"] = [variant for _, variant in split]
-    return df
+    models_df = models_df.copy()
+    split = [split_model_name(model) for model in models_df["model"]]
+    models_df["model_base"] = [base for base, _ in split]
+    models_df["text_variant"] = [variant for _, variant in split]
+    return models_df
 
 
 def build_domain_data(
@@ -132,17 +132,6 @@ def build_domain_data(
     }
 
 
-def json_safe(value: Any) -> Any:
-    """Replaces non-finite floats with None, which JSON can express and NaN cannot."""
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [json_safe(item) for item in value]
-    return value
-
-
 def split_payloads(
     domain: str, data: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -162,7 +151,8 @@ def split_payloads(
     return core, slices
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("domain", help="representation domain name, e.g. semantic, lexical")
     parser.add_argument("--parallelism-dir", type=Path, required=True)
@@ -170,7 +160,7 @@ def main() -> None:
     parser.add_argument("--trajectory-ui-rows", type=Path, required=True)
     parser.add_argument("--trajectory-by-genre-rows", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     parallelism_overall_df = pd.read_parquet(
         args.parallelism_dir / "stage=master" / "model_metrics_overall.parquet"
@@ -198,13 +188,12 @@ def main() -> None:
         trajectory_by_genre_rows,
     )
     core, slices = split_payloads(args.domain, data)
-    # allow_nan=False so a value JSON cannot express fails here rather than in a browser.
-    args.output.write_text(json.dumps(json_safe(core), allow_nan=False))
+    write_json(args.output, core)
     print(f"wrote domain={args.domain} to {args.output}")
 
     for metric, payload in sorted(slices.items()):
         path = args.output.with_name(f"{args.output.stem}_trajectory_{metric}.json")
-        path.write_text(json.dumps(json_safe(payload), allow_nan=False))
+        write_json(path, payload)
         print(f"wrote domain={args.domain} metric={metric} to {path}")
 
 

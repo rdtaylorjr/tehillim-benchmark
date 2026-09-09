@@ -1,15 +1,40 @@
+from functools import partial
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
 
-from genre.pairs import build_genre_pairs
-from genre.scripts.compare_by_genre import (
-    add_fdr_columns,
+from genre.across_genres import (
+    GenreRunConfig,
     compare_model_across_genres,
     compare_model_across_genres_sparse,
-    load_cached_rows,
 )
+from genre.pairs import build_genre_pairs
+from genre.scripts.compare_by_genre import add_fdr_columns, load_cached_genre_rows, score_model
+from library.errors import BenchmarkDataError
+from library.scoring import skipping_unscorable
+
+
+def _config(genre_by_psalm, genres, pairs) -> GenreRunConfig:
+    """The fixture's run configuration, at the small resampling budget the tests use."""
+    return GenreRunConfig(
+        genre_by_psalm=genre_by_psalm,
+        genres=genres,
+        pairs=pairs,
+        n_permutations=50,
+        n_resamples=50,
+        seed=0,
+    )
+
+
+def _nan_safe(row: dict) -> dict:
+    """NaN never equals itself, so an undefined CI needs a sentinel to compare rows for equality."""
+    return {
+        key: "nan" if isinstance(value, float) and np.isnan(value) else value
+        for key, value in row.items()
+    }
 
 
 def _fixture():
@@ -45,12 +70,7 @@ class TestCompareModelAcrossGenres:
             "model_a",
             psalm_ids,
             psalm_vectors,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
 
         assert {row["genre"] for row in rows} == set(genres)
@@ -63,12 +83,7 @@ class TestCompareModelAcrossGenres:
             "model_a",
             psalm_ids,
             psalm_vectors,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
 
         for row in rows:
@@ -85,16 +100,32 @@ class TestCompareModelAcrossGenres:
             "model_a",
             psalm_ids,
             psalm_vectors,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
 
-        for row in rows:
-            assert row["ap_ci_low"] <= row["average_precision"] <= row["ap_ci_high"]
+        by_genre = {row["genre"]: row for row in rows}
+        lament = by_genre["Lament"]
+        assert lament["ap_ci_low"] <= lament["average_precision"] <= lament["ap_ci_high"]
+        assert lament["auc_ci_low"] <= lament["separation_auc"] <= lament["auc_ci_high"]
+
+    def test_reports_nan_cis_for_a_genre_with_too_few_psalms_to_resample(self) -> None:
+        """Praise and Wisdom hold 2 psalms each, so 1 same-genre pair, too few for AP or AUC."""
+        psalm_ids, psalm_vectors, genre_by_psalm, genres, pairs = _fixture()
+
+        rows = compare_model_across_genres(
+            "model_a",
+            psalm_ids,
+            psalm_vectors,
+            _config(genre_by_psalm, genres, pairs),
+        )
+
+        by_genre = {row["genre"]: row for row in rows}
+        for genre in ("Praise", "Wisdom"):
+            assert np.isnan(by_genre[genre]["ap_ci_low"])
+            assert np.isnan(by_genre[genre]["ap_ci_high"])
+            assert np.isnan(by_genre[genre]["auc_ci_low"])
+            assert np.isnan(by_genre[genre]["auc_ci_high"])
+            assert not np.isnan(by_genre[genre]["average_precision"])
 
     def test_average_precision_matches_the_existing_pair_based_evaluator(self) -> None:
         """The AP point estimate is unchanged: still evaluate_genre_discrimination on the pairs."""
@@ -107,12 +138,7 @@ class TestCompareModelAcrossGenres:
             "model_a",
             psalm_ids,
             psalm_vectors,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
 
         for row in rows:
@@ -131,26 +157,16 @@ class TestCompareModelAcrossGenresSparse:
             "model_a",
             psalm_ids,
             psalm_vectors,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
         sparse_rows = compare_model_across_genres_sparse(
             "model_a",
             psalm_ids,
             sparse_matrix,
-            genre_by_psalm,
-            genres,
-            pairs,
-            n_permutations=50,
-            n_resamples=50,
-            seed=0,
+            _config(genre_by_psalm, genres, pairs),
         )
 
-        assert sparse_rows == dense_rows
+        assert [_nan_safe(row) for row in sparse_rows] == [_nan_safe(row) for row in dense_rows]
 
 
 def _rows_for_two_genres() -> list[dict]:
@@ -217,8 +233,7 @@ def _cache_row() -> dict:
         "separation_p_perm": 0.02,
         "separation_p_maxT": 0.05,
         "n_permutations": 2000,
-        # stale q-values from the prior run's own FDR family; must not be reused as-is,
-        # since a rerun adding new models changes the family and invalidates them.
+        # Stale q-values: a rerun adding models changes the FDR family and invalidates them.
         "naive_q": 0.03,
         "naive_q_by": 0.04,
         "perm_q": 0.03,
@@ -230,7 +245,7 @@ def _cache_row() -> dict:
 
 class TestLoadCachedRows:
     def test_returns_empty_when_the_cache_path_does_not_exist(self, tmp_path) -> None:
-        rows, models = load_cached_rows(tmp_path / "missing.csv")
+        rows, models = load_cached_genre_rows(tmp_path / "missing.csv")
 
         assert rows == []
         assert models == set()
@@ -239,7 +254,7 @@ class TestLoadCachedRows:
         cache_path = tmp_path / "cache.csv"
         pd.DataFrame([_cache_row()]).to_csv(cache_path, index=False)
 
-        rows, models = load_cached_rows(cache_path)
+        rows, models = load_cached_genre_rows(cache_path)
 
         assert models == {"m1"}
         assert len(rows) == 1
@@ -250,7 +265,7 @@ class TestLoadCachedRows:
         cache_path = tmp_path / "cache.csv"
         pd.DataFrame([_cache_row()]).to_csv(cache_path, index=False)
 
-        rows, _ = load_cached_rows(cache_path)
+        rows, _ = load_cached_genre_rows(cache_path)
 
         for stale_column in ("naive_q", "naive_q_by", "perm_q", "perm_q_by", "maxT_q", "maxT_q_by"):
             assert stale_column not in rows[0]
@@ -260,7 +275,7 @@ class TestLoadCachedRows:
         rows = [_cache_row(), {**_cache_row(), "model": "m2", "genre": "Praise"}]
         pd.DataFrame(rows).to_csv(cache_path, index=False)
 
-        _, models = load_cached_rows(cache_path)
+        _, models = load_cached_genre_rows(cache_path)
 
         assert models == {"m1", "m2"}
 
@@ -285,3 +300,47 @@ class TestAddFdrColumns:
             assert f"{source}_q" in result.columns
             assert f"{source}_q_by" in result.columns
             assert result[f"{source}_q"].notna().all()
+
+
+class TestScoreModel:
+    def test_names_every_row_after_the_files_dataset_identifier(
+        self, tmp_path: Path, write_embeddings_parquet
+    ) -> None:
+        _psalm_ids, psalm_vectors, genre_by_psalm, genres, pairs = _fixture()
+        path = write_embeddings_parquet(
+            tmp_path / "domain=d" / "model=mine" / "v.parquet",
+            {psalm: vector.tolist() for psalm, vector in psalm_vectors.items()},
+        )
+
+        rows = score_model(
+            path,
+            {psalm: [psalm] for psalm in psalm_vectors},
+            _config(genre_by_psalm, genres, pairs),
+        )
+
+        assert {row["model"] for row in rows} == {"mine"}
+        assert {row["genre"] for row in rows} == set(genres)
+
+    def test_raises_for_a_model_whose_psalm_vectors_cannot_be_scored(
+        self, tmp_path: Path, write_embeddings_parquet
+    ) -> None:
+        """One usable psalm leaves no pair, which the shared policy turns into a skip."""
+        path = write_embeddings_parquet(
+            tmp_path / "domain=d" / "model=tiny" / "v.parquet", {1: [1.0, 0.0]}
+        )
+        score = partial(
+            score_model,
+            half_verses_by_psalm={1: [1]},
+            config=GenreRunConfig(
+                genre_by_psalm={1: "Lament"},
+                genres=("Lament",),
+                pairs=build_genre_pairs({1: "Lament"}),
+                n_permutations=10,
+                n_resamples=10,
+                seed=0,
+            ),
+        )
+
+        with pytest.raises(BenchmarkDataError):
+            score(path)
+        assert skipping_unscorable(score)(path) is None

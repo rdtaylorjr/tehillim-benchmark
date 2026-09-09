@@ -5,11 +5,32 @@ import numpy as np
 from genre.permutation import one_vs_rest_masks
 from trajectory.genre_breakdown import (
     _batched_one_vs_rest_gap,
-    _batched_one_vs_rest_gap_naive,
     _dense_pair_matrices,
     _one_vs_rest_gap,
     joint_genre_breakdown_permutation_test,
 )
+
+
+def _batched_one_vs_rest_gap_naive(
+    distances: np.ndarray, idx_a: np.ndarray, idx_b: np.ndarray, is_target_batch: np.ndarray
+) -> np.ndarray:
+    """Reference implementation of the batched gap: explicit (permutations x pairs) masking."""
+    same_batch = is_target_batch[:, idx_a] & is_target_batch[:, idx_b]
+    population_batch = is_target_batch[:, idx_a] | is_target_batch[:, idx_b]
+    d = distances.astype(np.float64, copy=False)
+
+    same_sum = same_batch.astype(np.float64) @ d
+    same_count = same_batch.sum(axis=1).astype(np.float64)
+    population_sum = population_batch.astype(np.float64) @ d
+    population_count = population_batch.sum(axis=1).astype(np.float64)
+    # same is a subset of population, so the different side is population minus same.
+    diff_sum = population_sum - same_sum
+    diff_count = population_count - same_count
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        gap = (diff_sum / diff_count) - (same_sum / same_count)
+    invalid = (same_count == 0) | (diff_count == 0)
+    return np.where(invalid, np.nan, gap)
 
 
 def _hand_built_fixture() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, tuple[str, ...]]:
@@ -23,7 +44,7 @@ def _hand_built_fixture() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarra
 
 
 def test_one_vs_rest_gap_matches_hand_computed_values() -> None:
-    idx_a, idx_b, distances, genre_codes, genres = _hand_built_fixture()
+    idx_a, idx_b, distances, genre_codes, _genres = _hand_built_fixture()
 
     for g, expected in enumerate([5.5, 4.5]):
         same_mask, population_mask = one_vs_rest_masks(genre_codes, g)
@@ -53,10 +74,7 @@ def _dense_batch_inputs(
 
 
 def test_batched_one_vs_rest_gap_matches_a_naive_per_permutation_loop() -> None:
-    """idx_a/idx_b must be distinct unordered pairs (every real caller's contract, via
-    itertools.combinations): the dense quadratic-form reformation overwrites, not accumulates,
-    a repeated (a, b) index, unlike a naive per-pair mask, so a fixture with duplicate or
-    self-pairs would not exercise a real usage pattern."""
+    """idx_a and idx_b must be distinct unordered pairs, which every real caller guarantees."""
     rng = np.random.default_rng(11)
     n = 10
     idx_a, idx_b = np.triu_indices(n, k=1)
@@ -132,7 +150,7 @@ def test_joint_permutation_p_is_small_for_strong_genre_clustering() -> None:
     )
 
     assert all(p < 0.05 for p in result.p_perm)
-    assert all(p < 0.05 for p in result.p_maxT)
+    assert all(p < 0.05 for p in result.p_maxt)
 
 
 def test_permutation_p_is_large_when_labels_are_unrelated_to_distance() -> None:
@@ -159,8 +177,8 @@ def test_p_values_never_zero_and_maxt_at_least_p_perm() -> None:
     )
 
     assert all(p > 0.0 for p in result.p_perm)
-    assert all(p > 0.0 for p in result.p_maxT)
-    for p_perm, p_maxt in zip(result.p_perm, result.p_maxT, strict=True):
+    assert all(p > 0.0 for p in result.p_maxt)
+    for p_perm, p_maxt in zip(result.p_perm, result.p_maxt, strict=True):
         assert p_maxt >= p_perm
 
 
@@ -175,7 +193,7 @@ def test_same_seed_reproduces_identical_results() -> None:
     )
 
     assert result_a.p_perm == result_b.p_perm
-    assert result_a.p_maxT == result_b.p_maxT
+    assert result_a.p_maxt == result_b.p_maxt
 
 
 def test_observed_gap_matches_hand_built_fixture_through_the_full_function() -> None:
@@ -191,4 +209,4 @@ def test_observed_gap_matches_hand_built_fixture_through_the_full_function() -> 
         rng=np.random.default_rng(5),
     )
 
-    assert result.gap_observed == (5.5, 4.5)
+    assert result.observed == (5.5, 4.5)

@@ -1,29 +1,35 @@
 """Exports row-per-pair genre-pair detail plus a per-model AP/AUC/calibration summary."""
 
 import argparse
-import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from genre.calibrated import compare_genre_calibrated, genre_calibrated_row
+from genre.evaluate import pair_similarities
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs
-from genre.scripts.compare_calibrated import compare_genre_calibrated
-from library.bhsa import DEFAULT_CHECKOUT, list_psalms_cola_by_psalm, load_bhsa_api
+from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
 from library.calibration import BackgroundStats, background_similarity_stats, calibrated_z_score
+from library.cli import (
+    add_embeddings_dir_argument,
+    add_genre_csv_argument,
+    add_scoring_arguments,
+    report_reuse,
+)
 from library.embeddings import dataset_identifier
 from library.incremental_cache import load_cached_parquet_set
+from library.model_files import uncached_model_paths
 from library.psalm_vectors import load_psalm_vectors
-from library.retrieval_metrics import paired_cosine_similarity
+from library.rows_output import write_dataframe_parquet
+from library.scoring import skipping_unscorable
+from library.worker_pool import map_in_order
 
 _OUTPUT_FILES = ("genre_pair_detail.parquet", "genre_summary.parquet")
-
-
-def load_cached_detail(output_dir: Path) -> tuple[list[list[dict[str, Any]]], set[str]]:
-    """Reads prior detail parquet files' rows and the model set already covered by both."""
-    return load_cached_parquet_set(output_dir, _OUTPUT_FILES)
 
 
 def build_pair_detail_rows(
@@ -32,16 +38,8 @@ def build_pair_detail_rows(
     psalm_vectors: dict[int, np.ndarray],
     background: BackgroundStats,
 ) -> list[dict[str, Any]]:
-    """One row per usable pair: raw similarity, calibrated z, and whether the pair is same-genre.
-
-    Never includes genre_a/genre_b: together with psalm_a/psalm_b those would reconstruct the
-    third-party proprietary genre classification in full, not just a same/different equivalence
-    relation.
-    """
-    usable = [p for p in pairs if p.psalm_a in psalm_vectors and p.psalm_b in psalm_vectors]
-    a_vecs = np.stack([psalm_vectors[p.psalm_a] for p in usable])
-    b_vecs = np.stack([psalm_vectors[p.psalm_b] for p in usable])
-    similarities = paired_cosine_similarity(a_vecs, b_vecs)
+    """One row per usable pair: raw similarity, calibrated z, and a same_genre flag only."""
+    usable, similarities = pair_similarities(pairs, psalm_vectors)
     rows = []
     for pair, sim in zip(usable, similarities, strict=True):
         rows.append(
@@ -64,67 +62,61 @@ def build_summary_rows(
     background: BackgroundStats,
 ) -> list[dict[str, Any]]:
     """Single-row-per-model AP/AUC/calibration summary, wrapping compare_genre_calibrated."""
-    result = compare_genre_calibrated(pairs, psalm_vectors, background)
-    return [
-        {
-            "model": model,
-            "n_same_genre": result.n_same_genre,
-            "n_different_genre": result.n_different_genre,
-            "prevalence": result.prevalence,
-            "average_precision": result.average_precision,
-            "same_genre_effect_size": result.same_genre_effect_size,
-            "different_genre_effect_size": result.different_genre_effect_size,
-            "gap": result.same_genre_effect_size - result.different_genre_effect_size,
-            "separation_auc": result.separation_auc,
-            "separation_p": result.separation_p,
-        }
-    ]
+    return [genre_calibrated_row(model, compare_genre_calibrated(pairs, psalm_vectors, background))]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "genre_csv",
-        type=Path,
-        help="third-party genre CSV, e.g. psalms-browser.csv (not in this repo)",
+def score_model(
+    path: Path,
+    half_verses_by_psalm: dict[int, list[int]],
+    pairs: list[GenrePair],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """One model file's (pair rows, summary rows), scored independently of every other model."""
+    model = dataset_identifier(path)
+    psalm_vectors = load_psalm_vectors(path, half_verses_by_psalm)
+    background = background_similarity_stats(np.stack(list(psalm_vectors.values())))
+    return (
+        build_pair_detail_rows(model, pairs, psalm_vectors, background),
+        build_summary_rows(model, pairs, psalm_vectors, background),
     )
-    parser.add_argument("embeddings_dir", type=Path)
-    parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_factory: Callable[[str], Any] = load_bhsa_api,
+) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_genre_csv_argument(parser)
+    add_embeddings_dir_argument(parser)
     parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
+    add_scoring_arguments(parser)
+    args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    api = load_bhsa_api(args.checkout)
+    api = api_factory(args.checkout)
     genre_by_psalm = load_genre_by_psalm(args.genre_csv)
     pairs = build_genre_pairs(genre_by_psalm)
-    cola_by_psalm = list_psalms_cola_by_psalm(api)
+    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
 
-    (cached_pair_rows, cached_summary_rows), cached_models = load_cached_detail(args.output_dir)
-    if cached_models:
-        print(f"reusing {len(cached_models)} cached models from {args.output_dir}", file=sys.stderr)
+    (cached_pair_rows, cached_summary_rows), cached_models = load_cached_parquet_set(
+        args.output_dir, _OUTPUT_FILES
+    )
+    report_reuse(cached_models, args.output_dir)
 
-    model_paths = sorted(p for p in args.embeddings_dir.glob("**/*.parquet") if p.is_file())
+    model_paths = uncached_model_paths(args.embeddings_dir, cached_models)
     pair_rows: list[dict[str, Any]] = list(cached_pair_rows)
     summary_rows: list[dict[str, Any]] = list(cached_summary_rows)
-    for path in model_paths:
-        model = dataset_identifier(path)
-        if model in cached_models:
+    score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs)
+    for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+        if scored is None:
             continue
-        print(f"processing {model}")
-        psalm_vectors = load_psalm_vectors(path, cola_by_psalm)
-        background = background_similarity_stats(np.stack(list(psalm_vectors.values())))
+        model_pair_rows, model_summary_rows = scored
+        pair_rows.extend(model_pair_rows)
+        summary_rows.extend(model_summary_rows)
 
-        try:
-            pair_rows.extend(build_pair_detail_rows(model, pairs, psalm_vectors, background))
-            summary_rows.extend(build_summary_rows(model, pairs, psalm_vectors, background))
-        except ValueError as error:
-            print(
-                f"skipping {model}: {error} (only {len(psalm_vectors)} psalm vectors)",
-                file=sys.stderr,
-            )
-
-    pd.DataFrame(pair_rows).to_parquet(args.output_dir / "genre_pair_detail.parquet", index=False)
-    pd.DataFrame(summary_rows).to_parquet(args.output_dir / "genre_summary.parquet", index=False)
+    write_dataframe_parquet(args.output_dir / "genre_pair_detail.parquet", pd.DataFrame(pair_rows))
+    write_dataframe_parquet(args.output_dir / "genre_summary.parquet", pd.DataFrame(summary_rows))
     print(f"wrote {len(pair_rows)} pair rows, {len(summary_rows)} summary rows")
 
 

@@ -6,6 +6,8 @@ from itertools import combinations
 
 @dataclass(frozen=True, slots=True)
 class GenrePair:
+    """Two psalms compared for genre discrimination, and whether they share a genre."""
+
     psalm_a: int
     psalm_b: int
     genre_a: str
@@ -25,4 +27,4 @@ def build_genre_pairs(genre_by_psalm: dict[int, str]) -> list[GenrePair]:
 
 def filter_pairs_by_genre(pairs: list[GenrePair], genre: str) -> list[GenrePair]:
     """Genre pairs touching `genre` on at least one side, a one-vs-rest restriction."""
-    return [pair for pair in pairs if pair.genre_a == genre or pair.genre_b == genre]
+    return [pair for pair in pairs if genre in (pair.genre_a, pair.genre_b)]

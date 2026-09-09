@@ -8,6 +8,7 @@ from library.calibration import (
     calibrated_effect_size,
     calibrated_z_score,
 )
+from library.errors import InsufficientDataError
 
 
 def test_background_similarity_stats_excludes_self_comparisons() -> None:
@@ -65,3 +66,31 @@ def test_calibrated_effect_size_matches_the_z_score_formula() -> None:
 
     assert calibrated_effect_size(0.8, background) == pytest.approx(3.0)
     assert calibrated_effect_size(0.8, background) == calibrated_z_score(0.8, background)
+
+
+def test_background_stats_rejects_a_single_vector() -> None:
+    """One vector has no off-diagonal pair, so mean and std are undefined, not NaN."""
+    with pytest.raises(InsufficientDataError, match="at least 2"):
+        background_stats_from_matrix(np.array([[1.0]]))
+
+
+def test_background_similarity_stats_rejects_a_single_vector() -> None:
+    with pytest.raises(InsufficientDataError, match="at least 2"):
+        background_similarity_stats(np.array([[1.0, 0.0]]))
+
+
+def test_background_similarity_stats_sparse_matches_the_dense_function() -> None:
+    """The sparse background must report the same statistics as the dense one."""
+    import scipy.sparse as sp
+
+    from library.calibration import background_similarity_stats_sparse
+
+    rng = np.random.default_rng(2)
+    dense = rng.standard_normal((12, 20))
+
+    sparse_stats = background_similarity_stats_sparse(sp.csr_matrix(dense))
+    dense_stats = background_similarity_stats(dense)
+
+    assert sparse_stats.n_vectors == dense_stats.n_vectors
+    assert sparse_stats.mean == pytest.approx(dense_stats.mean, abs=1e-9)
+    assert sparse_stats.std == pytest.approx(dense_stats.std, abs=1e-9)

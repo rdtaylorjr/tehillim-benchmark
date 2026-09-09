@@ -62,7 +62,7 @@ def test_turning_angle_is_pi_for_a_direct_reversal() -> None:
 
 
 def test_turning_angle_is_nan_where_a_step_has_zero_length() -> None:
-    """Two consecutive identical cola (e.g. a repeated refrain) give a zero displacement."""
+    """Two consecutive identical half-verses (e.g. a repeated refrain) give a zero displacement."""
     sequence = np.array([[1.0, 0.0], [1.0, 0.0], [2.0, 0.0], [2.0, 1.0]])
 
     result = turning_angle(sequence)

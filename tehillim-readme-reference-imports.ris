@@ -1,0 +1,348 @@
+TY  - CONF
+AU  - Muennighoff, Niklas
+AU  - Tazi, Nouamane
+AU  - Magne, Loïc
+AU  - Reimers, Nils
+TI  - MTEB: Massive Text Embedding Benchmark
+T2  - Proceedings of the 17th Conference of the European Chapter of the Association for Computational Linguistics
+PY  - 2023
+CY  - Dubrovnik, Croatia
+PB  - Association for Computational Linguistics
+SP  - 2014
+EP  - 2037
+DO  - 10.18653/v1/2023.eacl-main.148
+UR  - https://aclanthology.org/2023.eacl-main.148/
+KW  - tehillim-benchmark
+KW  - embedding evaluation
+N1  - Cite only if the README explains the relation between this repository's protocol and MTEB.
+ER  - 
+
+TY  - JOUR
+AU  - Sakoe, Hiroaki
+AU  - Chiba, Seibi
+TI  - Dynamic Programming Algorithm Optimization for Spoken Word Recognition
+JO  - IEEE Transactions on Acoustics, Speech, and Signal Processing
+PY  - 1978
+VL  - 26
+IS  - 1
+SP  - 43
+EP  - 49
+DO  - 10.1109/TASSP.1978.1163055
+KW  - tehillim-benchmark
+KW  - dynamic time warping
+ER  - 
+
+TY  - JOUR
+AU  - Winkler, Anderson M.
+AU  - Ridgway, Gerard R.
+AU  - Webster, Matthew A.
+AU  - Smith, Stephen M.
+AU  - Nichols, Thomas E.
+TI  - Permutation Inference for the General Linear Model
+JO  - NeuroImage
+PY  - 2014
+VL  - 92
+SP  - 381
+EP  - 397
+DO  - 10.1016/j.neuroimage.2014.01.060
+KW  - tehillim-benchmark
+KW  - permutation inference
+ER  - 
+
+TY  - CONF
+AU  - Davis, Jesse
+AU  - Goadrich, Mark
+TI  - The Relationship Between Precision-Recall and ROC Curves
+T2  - Proceedings of the 23rd International Conference on Machine Learning
+PY  - 2006
+CY  - New York, NY
+PB  - Association for Computing Machinery
+SP  - 233
+EP  - 240
+DO  - 10.1145/1143844.1143874
+UR  - https://doi.org/10.1145/1143844.1143874
+KW  - tehillim-benchmark
+KW  - retrieval evaluation
+ER  - 
+
+TY  - JOUR
+AU  - Phipson, Belinda
+AU  - Smyth, Gordon K.
+TI  - Permutation P-values Should Never Be Zero: Calculating Exact P-values When Permutations Are Randomly Drawn
+JO  - Statistical Applications in Genetics and Molecular Biology
+PY  - 2010
+VL  - 9
+IS  - 1
+SP  - 39
+DO  - 10.2202/1544-6115.1585
+UR  - https://doi.org/10.2202/1544-6115.1585
+KW  - tehillim-benchmark
+KW  - tehillim-trublet
+KW  - Monte Carlo inference
+ER  - 
+
+TY  - CONF
+AU  - Ng, Andrew Y.
+AU  - Jordan, Michael I.
+AU  - Weiss, Yair
+TI  - On Spectral Clustering: Analysis and an Algorithm
+T2  - Advances in Neural Information Processing Systems 14
+PY  - 2002
+PB  - MIT Press
+SP  - 849
+EP  - 856
+UR  - https://proceedings.neurips.cc/paper_files/paper/2001/hash/801272ee79cfde7fa5960571fee36b9b-Abstract.html
+KW  - tehillim-clustering
+KW  - spectral clustering
+ER  - 
+
+TY  - JOUR
+AU  - Tibshirani, Robert
+AU  - Walther, Guenther
+AU  - Hastie, Trevor
+TI  - Estimating the Number of Clusters in a Data Set via the Gap Statistic
+JO  - Journal of the Royal Statistical Society: Series B (Statistical Methodology)
+PY  - 2001
+VL  - 63
+IS  - 2
+SP  - 411
+EP  - 423
+DO  - 10.1111/1467-9868.00293
+UR  - https://doi.org/10.1111/1467-9868.00293
+KW  - tehillim-clustering
+KW  - cluster selection
+ER  - 
+
+TY  - JOUR
+AU  - von Luxburg, Ulrike
+TI  - A Tutorial on Spectral Clustering
+JO  - Statistics and Computing
+PY  - 2007
+VL  - 17
+IS  - 4
+SP  - 395
+EP  - 416
+DO  - 10.1007/s11222-007-9033-z
+UR  - https://doi.org/10.1007/s11222-007-9033-z
+KW  - tehillim-clustering
+KW  - spectral clustering
+ER  - 
+
+TY  - CONF
+AU  - Mu, Jiaqi
+AU  - Bhat, Suma
+AU  - Viswanath, Pramod
+TI  - All-but-the-Top: Simple and Effective Postprocessing for Word Representations
+T2  - International Conference on Learning Representations
+PY  - 2018
+UR  - https://openreview.net/forum?id=HkuGJ3kCb
+KW  - tehillim-clustering
+KW  - embedding anisotropy
+ER  - 
+
+TY  - JOUR
+AU  - Kuhn, Harold W.
+TI  - The Hungarian Method for the Assignment Problem
+JO  - Naval Research Logistics Quarterly
+PY  - 1955
+VL  - 2
+IS  - 1-2
+SP  - 83
+EP  - 97
+DO  - 10.1002/nav.3800020109
+UR  - https://doi.org/10.1002/nav.3800020109
+KW  - tehillim-clustering
+KW  - assignment problem
+ER  - 
+
+TY  - BOOK
+AU  - Good, Phillip I.
+TI  - Permutation Tests: A Practical Guide to Resampling Methods for Testing Hypotheses
+PY  - 2000
+ET  - 2
+CY  - New York, NY
+PB  - Springer
+T3  - Springer Series in Statistics
+DO  - 10.1007/978-1-4757-3235-1
+UR  - https://doi.org/10.1007/978-1-4757-3235-1
+KW  - tehillim-trublet
+KW  - tehillim-texttype
+KW  - permutation tests
+ER  - 
+
+TY  - JOUR
+AU  - Ochiai, Akira
+TI  - Zoogeographical Studies on the Soleoid Fishes Found in Japan and Its Neighbouring Regions-II
+JO  - Bulletin of the Japanese Society of Scientific Fisheries
+PY  - 1957
+VL  - 22
+IS  - 9
+SP  - 526
+EP  - 530
+UR  - https://www.jstage.jst.go.jp/article/suisan1932/22/9/22_9_526/_pdf
+KW  - tehillim-trublet
+KW  - similarity coefficient
+ER  - 
+
+TY  - JOUR
+AU  - Hellinger, Ernst
+TI  - Neue Begründung der Theorie quadratischer Formen von unendlichvielen Veränderlichen
+JO  - Journal für die reine und angewandte Mathematik
+PY  - 1909
+VL  - 136
+SP  - 210
+EP  - 271
+DO  - 10.1515/crll.1909.136.210
+UR  - https://doi.org/10.1515/crll.1909.136.210
+KW  - tehillim-trublet
+KW  - Hellinger distance
+ER  - 
+
+TY  - JOUR
+AU  - Efron, Bradley
+TI  - Bootstrap Methods: Another Look at the Jackknife
+JO  - The Annals of Statistics
+PY  - 1979
+VL  - 7
+IS  - 1
+SP  - 1
+EP  - 26
+DO  - 10.1214/aos/1176344552
+UR  - https://doi.org/10.1214/aos/1176344552
+KW  - tehillim-texttype
+KW  - tehillim-dss2etcbc
+KW  - bootstrap
+ER  - 
+
+TY  - JOUR
+AU  - Gotoh, Osamu
+TI  - An Improved Algorithm for Matching Biological Sequences
+JO  - Journal of Molecular Biology
+PY  - 1982
+VL  - 162
+IS  - 3
+SP  - 705
+EP  - 708
+DO  - 10.1016/0022-2836(82)90398-9
+UR  - https://doi.org/10.1016/0022-2836(82)90398-9
+KW  - tehillim-dss2etcbc
+KW  - affine-gap alignment
+ER  - 
+
+TY  - JOUR
+AU  - Needleman, Saul B.
+AU  - Wunsch, Christian D.
+TI  - A General Method Applicable to the Search for Similarities in the Amino Acid Sequence of Two Proteins
+JO  - Journal of Molecular Biology
+PY  - 1970
+VL  - 48
+IS  - 3
+SP  - 443
+EP  - 453
+DO  - 10.1016/0022-2836(70)90057-4
+UR  - https://doi.org/10.1016/0022-2836(70)90057-4
+KW  - tehillim-dss2etcbc
+KW  - global sequence alignment
+ER  - 
+
+TY  - JOUR
+AU  - Yadin, Yigael
+TI  - Another Fragment (E) of the Psalms Scroll from Qumran Cave 11 (11QPsa)
+JO  - Textus
+PY  - 1966
+VL  - 5
+SP  - 1
+EP  - 10
+UR  - https://bibleproject.huji.ac.il/publications/another-fragment-e-psalms-scroll-qumran-cave-11-11qpsa
+KW  - tehillim-dss2etcbc
+KW  - 11Q5
+KW  - primary edition
+ER  - 
+
+TY  - COMP
+AU  - Eep Talstra Centre for Bible and Computer
+TI  - DSS2ETCBC
+UR  - https://github.com/ETCBC/DSS2ETCBC
+Y2  - 2026/09/02
+KW  - tehillim-dss2etcbc
+KW  - source dataset
+N1  - Cite a commit hash or release identifier with the repository URL in any formal publication.
+ER  - 
+
+TY  - JOUR
+AU  - Wilkinson, Mark D.
+AU  - Dumontier, Michel
+AU  - Aalbersberg, IJsbrand Jan
+AU  - Appleton, Gabrielle
+AU  - Axton, Myles
+AU  - Baak, Arie
+AU  - Blomberg, Niklas
+AU  - Boiten, Jan-Willem
+AU  - da Silva Santos, Luiz Bonino
+AU  - Bourne, Philip E.
+AU  - Bouwman, Jildau
+AU  - Brookes, Anthony J.
+AU  - Clark, Tim
+AU  - Crosas, Mercè
+AU  - Dillo, Ingrid
+AU  - Dumon, Olivier
+AU  - Edmunds, Scott
+AU  - Evelo, Chris T.
+AU  - Finkers, Richard
+AU  - Gonzalez-Beltran, Alejandra
+AU  - Gray, Alasdair J. G.
+AU  - Groth, Paul
+AU  - Goble, Carole
+AU  - Grethe, Jeffrey S.
+AU  - Heringa, Jaap
+AU  - 't Hoen, Peter A. C.
+AU  - Hooft, Rob
+AU  - Kuhn, Tobias
+AU  - Kok, Ruben
+AU  - Kok, Joost
+AU  - Lusher, Scott J.
+AU  - Martone, Maryann E.
+AU  - Mons, Albert
+AU  - Packer, Abel L.
+AU  - Persson, Bengt
+AU  - Rocca-Serra, Philippe
+AU  - Roos, Marco
+AU  - van Schaik, Rene
+AU  - Sansone, Susanna-Assunta
+AU  - Schultes, Erik
+AU  - Sengstag, Thierry
+AU  - Slater, Ted
+AU  - Strawn, George
+AU  - Swertz, Morris A.
+AU  - Thompson, Mark
+AU  - van der Lei, Johan
+AU  - van Mulligen, Erik
+AU  - Velterop, Jan
+AU  - Waagmeester, Andra
+AU  - Wittenburg, Peter
+AU  - Wolstencroft, Katherine
+AU  - Zhao, Jun
+AU  - Mons, Barend
+TI  - The FAIR Guiding Principles for Scientific Data Management and Stewardship
+JO  - Scientific Data
+PY  - 2016
+VL  - 3
+SP  - 160018
+DO  - 10.1038/sdata.2016.18
+UR  - https://doi.org/10.1038/sdata.2016.18
+KW  - tehillim-data
+KW  - research data management
+KW  - provenance
+ER  - 
+
+TY  - RPRT
+AU  - Moreau, Luc
+AU  - Missier, Paolo
+TI  - PROV-DM: The PROV Data Model
+PY  - 2013
+PB  - World Wide Web Consortium
+UR  - https://www.w3.org/TR/prov-dm/
+KW  - tehillim-data
+KW  - provenance
+KW  - data model
+ER  - 

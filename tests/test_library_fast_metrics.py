@@ -48,9 +48,7 @@ def test_fast_auc_matches_scipy_mannwhitneyu_on_random_continuous_scores(seed: i
 
 
 def test_fast_average_precision_matches_sklearn_with_heavy_ties() -> None:
-    """Real cosine similarities can tie exactly (e.g. identical vectors); sklearn resolves ties
-    by grouping at the shared threshold, not by an arbitrary within-tie order.
-    """
+    """Real cosine similarities tie exactly, so the fast path must match sklearn under ties."""
     rng = np.random.default_rng(0)
     true_sims = rng.choice([0.3, 0.5, 0.5, 0.7, 0.9], size=40)
     baseline_sims = rng.choice([0.3, 0.5, 0.5, 0.7, 0.9], size=60)
@@ -90,9 +88,7 @@ def test_fast_auc_perfect_separation_is_one() -> None:
 
 @pytest.mark.parametrize("seed", range(20))
 def test_fast_metrics_match_at_full_corpus_scale_with_rounded_tie_prone_scores(seed: int) -> None:
-    """Corpus-scale n (hundreds to thousands) with 3-decimal rounding, since real cosine
-    similarities from identical or near-identical vectors do produce exact ties at this scale.
-    """
+    """Corpus-scale n (hundreds to thousands) with 3-decimal rounding."""
     rng = np.random.default_rng(seed)
     n_true = rng.integers(20, 1200)
     n_baseline = rng.integers(500, 3500)

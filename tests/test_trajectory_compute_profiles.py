@@ -7,6 +7,7 @@ from trajectory.scripts.compute_profiles import (
     distance_rows,
     profile_rows,
     profile_shard_path,
+    score_model,
 )
 
 
@@ -18,7 +19,7 @@ def _sequences_and_centroids() -> tuple[dict[int, np.ndarray], dict[int, np.ndar
     return sequences, centroids
 
 
-def test_compute_psalm_profiles_skips_psalms_with_too_few_cola() -> None:
+def test_compute_psalm_profiles_skips_psalms_with_too_few_half_verses() -> None:
     sequences, centroids = _sequences_and_centroids()
 
     profiles = compute_psalm_profiles(sequences, centroids)
@@ -44,7 +45,7 @@ def test_compute_psalm_profiles_skips_a_psalm_missing_its_centroid() -> None:
     assert profiles == {}
 
 
-def test_profile_rows_flattens_one_row_per_psalm_with_its_real_cola_count() -> None:
+def test_profile_rows_flattens_one_row_per_psalm_with_its_real_half_verse_count() -> None:
     sequences, centroids = _sequences_and_centroids()
     profiles = compute_psalm_profiles(sequences, centroids)
 
@@ -53,7 +54,7 @@ def test_profile_rows_flattens_one_row_per_psalm_with_its_real_cola_count() -> N
     assert len(rows) == 1
     assert rows[0]["model"] == "model_a"
     assert rows[0]["psalm"] == 1
-    assert rows[0]["n_cola"] == 5
+    assert rows[0]["n_half_verses"] == 5
     assert rows[0]["dim"] == 2
     assert len(rows[0]["sequence"]) == 10
 
@@ -114,3 +115,31 @@ def test_profile_shard_path_writes_one_file_per_model_directly_under_output_dir(
     path = profile_shard_path(Path("results/trajectory"), "bge_m3_vocalized")
 
     assert path == Path("results/trajectory/bge_m3_vocalized.parquet")
+
+
+def test_score_model_writes_a_profile_shard_and_returns_its_distance_rows(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        {
+            1: [1.0, 0.0],
+            2: [0.9, 0.1],
+            3: [0.7, 0.3],
+            4: [0.5, 0.5],
+            5: [0.0, 1.0],
+            6: [0.1, 0.9],
+            7: [0.3, 0.7],
+            8: [0.5, 0.5],
+        },
+    )
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+
+    n_profile_rows, rows = score_model(path, {1: [1, 2, 3, 4], 2: [5, 6, 7, 8]}, output_dir)
+
+    assert profile_shard_path(output_dir, "mine").exists()
+    assert n_profile_rows == 2
+    assert [row["model"] for row in rows] == ["mine"]
+    assert {row["psalm_a"] for row in rows} == {1}
+    assert {row["psalm_b"] for row in rows} == {2}

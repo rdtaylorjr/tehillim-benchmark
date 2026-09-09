@@ -1,7 +1,8 @@
-"""Computes each psalm's content centroid and cola sequence, all models."""
+"""Computes each psalm's content centroid and half-verses sequence, all models."""
 
 import argparse
-import sys
+from collections.abc import Callable
+from functools import partial
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -9,26 +10,40 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from library.bhsa import DEFAULT_CHECKOUT, list_psalms_cola_by_psalm, load_bhsa_api
-from library.centroid import psalm_centroids
-from library.embeddings import dataset_identifier, load_embeddings
+from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from library.centroid import psalm_centroids, sparse_psalm_centroids
+from library.cli import add_embeddings_dir_argument, add_scoring_arguments, report_reuse
+from library.embeddings import (
+    dataset_identifier,
+    is_sparse_embeddings,
+    load_embeddings,
+    load_sparse_embeddings,
+)
 from library.incremental_cache import load_cached_parquet_set
+from library.model_files import uncached_model_paths
+from library.rows_output import write_dataframe_parquet
+from library.scoring import skipping_unscorable
+from library.worker_pool import map_in_order
 from trajectory.distance import content_distance, dtw_curve_distance, structural_distance_dtw
 from trajectory.geometry import adjacent_similarity, step_magnitude, turning_angle
 from trajectory.self_similarity import self_similarity_matrix
-from trajectory.sequence import normalize_sequence, psalm_cola_sequences
+from trajectory.sequence import (
+    normalize_sequence,
+    psalm_half_verse_sequences,
+    psalm_half_verse_sequences_sparse,
+)
 
-_MIN_COLA = 4
+_MIN_HALF_VERSES = 4
 
 
 def compute_psalm_profiles(
     sequences_by_psalm: dict[int, np.ndarray],
     centroids_by_psalm: dict[int, np.ndarray],
 ) -> dict[int, dict[str, np.ndarray]]:
-    """One profile per psalm with a centroid and at least _MIN_COLA cola for the other curves."""
+    """One profile per psalm with a centroid and at least _MIN_HALF_VERSES half-verses."""
     profiles = {}
     for psalm, sequence in sequences_by_psalm.items():
-        if psalm not in centroids_by_psalm or len(sequence) < _MIN_COLA:
+        if psalm not in centroids_by_psalm or len(sequence) < _MIN_HALF_VERSES:
             continue
         profiles[psalm] = {
             "centroid": centroids_by_psalm[psalm],
@@ -38,7 +53,7 @@ def compute_psalm_profiles(
 
 
 def profile_rows(model: str, profiles: dict[int, dict[str, np.ndarray]]) -> list[dict[str, Any]]:
-    """Flattens each psalm's profile into one row: the real, un-resampled cola sequence."""
+    """Flattens each psalm's profile into one row: the real, un-resampled half-verses sequence."""
     rows = []
     for psalm, profile in profiles.items():
         sequence = profile["sequence"]
@@ -48,7 +63,7 @@ def profile_rows(model: str, profiles: dict[int, dict[str, np.ndarray]]) -> list
                 "psalm": psalm,
                 "centroid": profile["centroid"].astype(np.float32),
                 "sequence": sequence.flatten().astype(np.float32),
-                "n_cola": sequence.shape[0],
+                "n_half_verses": sequence.shape[0],
                 "dim": sequence.shape[1],
             }
         )
@@ -89,48 +104,75 @@ def profile_shard_path(output_dir: Path, model: str) -> Path:
     return output_dir / f"{model}.parquet"
 
 
-def main() -> None:
+def score_model(
+    path: Path, half_verses_by_psalm: dict[int, list[int]], output_dir: Path
+) -> tuple[int, list[dict[str, Any]]]:
+    """Writes one model file's profile shard and returns its row count plus its distance rows."""
+    model = dataset_identifier(path)
+    if is_sparse_embeddings(path):
+        node_ids, matrix = load_sparse_embeddings(path)
+        sequences_by_psalm = psalm_half_verse_sequences_sparse(
+            half_verses_by_psalm, node_ids, matrix
+        )
+        psalms, centroids = sparse_psalm_centroids(half_verses_by_psalm, node_ids, matrix)
+        dense_centroids = centroids.toarray().astype("<f4", copy=False)
+        centroids_by_psalm = {p: dense_centroids[i] for i, p in enumerate(psalms)}
+    else:
+        node_vectors = load_embeddings(path)
+        sequences_by_psalm = psalm_half_verse_sequences(half_verses_by_psalm, node_vectors)
+        centroids_by_psalm = psalm_centroids(half_verses_by_psalm, node_vectors)
+    profiles = compute_psalm_profiles(sequences_by_psalm, centroids_by_psalm)
+    rows = profile_rows(model, profiles)
+    write_dataframe_parquet(
+        profile_shard_path(output_dir, model),
+        pd.DataFrame(rows),
+        compression="zstd",
+        compression_level=19,
+    )
+    return len(rows), distance_rows(model, profiles)
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_factory: Callable[[str], Any] = load_bhsa_api,
+) -> None:
+    """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("embeddings_dir", type=Path)
-    parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
+    add_embeddings_dir_argument(parser)
     parser.add_argument("--output-dir", type=Path, required=True)
-    args = parser.parse_args()
+    add_scoring_arguments(parser)
+    args = parser.parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    api = load_bhsa_api(args.checkout)
-    cola_by_psalm = list_psalms_cola_by_psalm(api)
+    api = api_factory(args.checkout)
+    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
 
     (cached_distance_rows,), cached_models = load_cached_parquet_set(
         args.output_dir, ("trajectory_distances.parquet",)
     )
-    if cached_models:
-        print(f"reusing {len(cached_models)} cached models from {args.output_dir}", file=sys.stderr)
+    report_reuse(cached_models, args.output_dir)
 
-    model_paths = sorted(p for p in args.embeddings_dir.glob("**/*.parquet") if p.is_file())
+    # A cached model still needs rescoring when its own profile shard is missing.
+    complete = {
+        model for model in cached_models if profile_shard_path(args.output_dir, model).exists()
+    }
+    model_paths = uncached_model_paths(args.embeddings_dir, complete)
     all_distance_rows: list[dict[str, Any]] = list(cached_distance_rows)
     n_profile_rows = 0
-    for path in model_paths:
-        model = dataset_identifier(path)
-        if model in cached_models and profile_shard_path(args.output_dir, model).exists():
+    score = partial(
+        score_model, half_verses_by_psalm=half_verses_by_psalm, output_dir=args.output_dir
+    )
+    for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+        if scored is None:
             continue
-        print(f"processing {model}")
-        node_vectors = load_embeddings(path)
-        sequences_by_psalm = psalm_cola_sequences(cola_by_psalm, node_vectors)
-        centroids_by_psalm = psalm_centroids(cola_by_psalm, node_vectors)
-        profiles = compute_psalm_profiles(sequences_by_psalm, centroids_by_psalm)
-        rows = profile_rows(model, profiles)
-        pd.DataFrame(rows).to_parquet(
-            profile_shard_path(args.output_dir, model),
-            index=False,
-            compression="zstd",
-            compression_level=19,
-        )
-        n_profile_rows += len(rows)
-        all_distance_rows.extend(distance_rows(model, profiles))
+        model_n_rows, model_distance_rows = scored
+        n_profile_rows += model_n_rows
+        all_distance_rows.extend(model_distance_rows)
 
-    pd.DataFrame(all_distance_rows).to_parquet(
+    write_dataframe_parquet(
         args.output_dir / "trajectory_distances.parquet",
-        index=False,
+        pd.DataFrame(all_distance_rows),
         compression="zstd",
         compression_level=19,
     )

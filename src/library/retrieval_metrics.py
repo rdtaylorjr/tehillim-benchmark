@@ -7,51 +7,92 @@ import numpy as np
 import scipy.sparse as sp
 from scipy.stats import rankdata, wilcoxon
 
+from library.blocking import row_blocks
+from library.errors import DegenerateVectorError, InsufficientDataError
+from library.protocol import DEFAULT_N_PERMUTATIONS
+
+_MIN_ANCHORS_FOR_NULL = 2
+
+
+def _reject_zero_rows(*arrays: np.ndarray) -> None:
+    """Checked on the float32 input, so a degenerate vector raises before any work is done."""
+    for array in arrays:
+        for span in row_blocks(len(array), array.shape[1]):
+            block = array[span]
+            #: einsum sums the squares in place, where norm would allocate a temp the size of array.
+            if np.any(np.einsum("ij,ij->i", block, block) == 0):
+                raise DegenerateVectorError("cannot compute cosine similarity for a zero vector")
+
+
+def _unit_rows(block: np.ndarray) -> np.ndarray:
+    """Normalises in place, so one block costs one float64 array rather than two."""
+    rows = block.astype(np.float64)
+    rows /= np.linalg.norm(rows, axis=1, keepdims=True)
+    return rows
+
 
 class DiscriminationResult(NamedTuple):
+    """Mann-Whitney comparison of two score populations, with its rank-biserial size."""
+
     statistic: float
     p_value: float
     rank_biserial: float
 
 
 class PermutationResult(NamedTuple):
+    """An observed gap against its permutation null, as a p-value and a z-score."""
+
     observed_gap: float
     p_value: float
     z_score: float
 
 
-class BootstrapResult(NamedTuple):
-    observed_diff: float
-    ci_low: float
-    ci_high: float
-    p_value: float
-
-
 def cosine_similarity_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Row-wise cosine similarity between every vector in a and every vector in b."""
-    a_norm = np.linalg.norm(a, axis=1, keepdims=True)
-    b_norm = np.linalg.norm(b, axis=1, keepdims=True)
-    if np.any(a_norm == 0) or np.any(b_norm == 0):
-        raise ValueError("cannot compute cosine similarity for a zero vector")
-    return np.asarray((a / a_norm) @ (b / b_norm).T)
+    #: Embeddings are float32, and accumulating there reorders exact ties that AP and AUC then rank.
+    _reject_zero_rows(a, b)
+    right = _unit_rows(b).T
+    similarities = np.empty((len(a), len(b)), dtype=np.float64)
+    #: A fixed block keeps the cast off the whole left operand and the shape stable across inputs.
+    for span in row_blocks(len(a), a.shape[1]):
+        similarities[span] = _unit_rows(a[span]) @ right
+    return similarities
 
 
 def sparse_cosine_similarity_matrix(a: sp.csr_matrix, b: sp.csr_matrix) -> np.ndarray:
     """Same semantics as cosine_similarity_matrix, but a and b are sparse and never densified."""
+    #: Sparse rows carry only their nonzeros, so one cast here is far cheaper than a dense one.
+    a, b = a.astype(np.float64, copy=False), b.astype(np.float64, copy=False)
     a_norm = np.sqrt(np.asarray(a.multiply(a).sum(axis=1))).ravel()
     b_norm = np.sqrt(np.asarray(b.multiply(b).sum(axis=1))).ravel()
     if np.any(a_norm == 0) or np.any(b_norm == 0):
-        raise ValueError("cannot compute cosine similarity for a zero vector")
+        raise DegenerateVectorError("cannot compute cosine similarity for a zero vector")
     a_normalized = sp.diags(1.0 / a_norm) @ a
     b_normalized = sp.diags(1.0 / b_norm) @ b
     return np.asarray((a_normalized @ b_normalized.T).toarray())
 
 
+def sparse_paired_cosine_similarity(a: sp.csr_matrix, b: sp.csr_matrix) -> np.ndarray:
+    """Same semantics as paired_cosine_similarity, comparing sparse rows without densifying."""
+    #: Widened like every other cosine routine, so storing a model sparsely cannot change its score.
+    a, b = a.astype(np.float64, copy=False), b.astype(np.float64, copy=False)
+    a_norm = np.sqrt(np.asarray(a.multiply(a).sum(axis=1))).ravel()
+    b_norm = np.sqrt(np.asarray(b.multiply(b).sum(axis=1))).ravel()
+    if np.any(a_norm == 0) or np.any(b_norm == 0):
+        raise DegenerateVectorError("cannot compute cosine similarity for a zero vector")
+    dots = np.asarray(a.multiply(b).sum(axis=1)).ravel()
+    return np.asarray(dots / (a_norm * b_norm))
+
+
 def paired_cosine_similarity(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Cosine similarity of a[i] against b[i] only, never any other row."""
-    a_norm = a / np.linalg.norm(a, axis=1, keepdims=True)
-    b_norm = b / np.linalg.norm(b, axis=1, keepdims=True)
-    return np.asarray(np.sum(a_norm * b_norm, axis=1))
+    _reject_zero_rows(a, b)
+    similarities = np.empty(len(a), dtype=np.float64)
+    #: Each row is independent, so a blocked pass is bit-identical to casting the whole stack.
+    for span in row_blocks(len(a), a.shape[1]):
+        #: np.sum over the product, not einsum, which sums in a different order and shifts bits.
+        similarities[span] = np.sum(_unit_rows(a[span]) * _unit_rows(b[span]), axis=1)
+    return similarities
 
 
 def ranks_from_similarity_matrix(
@@ -59,38 +100,12 @@ def ranks_from_similarity_matrix(
     pool_ids: Sequence[str],
     true_target_ids: Sequence[str],
 ) -> list[float]:
-    """Same ranks as retrieval_ranks, from an already-computed matrix (no matmul recomputed)."""
+    """Tie-averaged rank of each anchor's true target, from an already-computed matrix."""
     pool_index = {pid: i for i, pid in enumerate(pool_ids)}
     true_columns = np.array([pool_index[tid] for tid in true_target_ids])
     rank_matrix = rankdata(-similarities, method="average", axis=1)
     rows = np.arange(similarities.shape[0])
     return [float(r) for r in rank_matrix[rows, true_columns]]
-
-
-def retrieval_ranks(
-    anchor_vectors: np.ndarray,
-    pool_vectors: np.ndarray,
-    pool_ids: Sequence[str],
-    true_target_ids: Sequence[str],
-) -> list[float]:
-    """For each anchor, the (tie-averaged) rank of its true target among the pool, 1 = closest."""
-    similarities = cosine_similarity_matrix(anchor_vectors, pool_vectors)
-    return ranks_from_similarity_matrix(similarities, pool_ids, true_target_ids)
-
-
-def outranking_candidates(
-    similarities: np.ndarray, pool_ids: Sequence[str], true_target_ids: Sequence[str]
-) -> list[list[str]]:
-    """For each anchor, the other pool ids whose similarity ties or beats the true target's."""
-    pool_index = {pid: i for i, pid in enumerate(pool_ids)}
-    outrankers = []
-    for row, true_id in zip(similarities, true_target_ids, strict=True):
-        true_similarity = row[pool_index[true_id]]
-        beaters = [
-            pid for pid in pool_ids if pid != true_id and row[pool_index[pid]] >= true_similarity
-        ]
-        outrankers.append(beaters)
-    return outrankers
 
 
 def mean_reciprocal_rank(ranks: Sequence[float] | np.ndarray) -> float:
@@ -145,7 +160,8 @@ def _per_anchor_gap(similarity_matrix: np.ndarray, true_positions: np.ndarray) -
     return np.asarray(true_sim - null_sim)
 
 
-def _combine_by_stratum(gaps: np.ndarray, stratum: np.ndarray, weighted: bool) -> float:
+def _combine_by_stratum(gaps: np.ndarray, stratum: np.ndarray, *, weighted: bool) -> float:
+    """Mean gap across strata, weighted by stratum size when the caller asks for it."""
     if weighted:
         return float(gaps.mean())
     stratum_means = [gaps[stratum == value].mean() for value in np.unique(stratum)]
@@ -172,7 +188,7 @@ def _per_anchor_gap_batch(
 
 
 def _combine_by_stratum_batch(
-    gaps_batch: np.ndarray, stratum: np.ndarray, weighted: bool
+    gaps_batch: np.ndarray, stratum: np.ndarray, *, weighted: bool
 ) -> np.ndarray:
     """Batched _combine_by_stratum: gaps_batch is (B, n), returns combined values of shape (B,)."""
     if weighted:
@@ -186,65 +202,30 @@ def _combine_by_stratum_batch(
 def stratified_mean_gap_test(
     similarity_matrix: np.ndarray,
     anchor_stratum: np.ndarray,
-    n_permutations: int = 10000,
-    rng: np.random.Generator | None = None,
+    n_permutations: int = DEFAULT_N_PERMUTATIONS,
+    *,
+    rng: np.random.Generator,
     weighted: bool = False,
 ) -> PermutationResult:
     """Permutation test of true-pair similarity; prefer z_score, p_value saturates its floor."""
-    rng = rng if rng is not None else np.random.default_rng()
     similarity_matrix = np.asarray(similarity_matrix, dtype=float)
     anchor_stratum = np.asarray(anchor_stratum)
     n = similarity_matrix.shape[0]
+    if n < _MIN_ANCHORS_FOR_NULL:
+        raise InsufficientDataError(
+            f"a per-anchor null needs at least {_MIN_ANCHORS_FOR_NULL} anchors, got {n}"
+        )
 
     observed_gaps = _per_anchor_gap(similarity_matrix, np.arange(n))
-    observed = _combine_by_stratum(observed_gaps, anchor_stratum, weighted)
+    observed = _combine_by_stratum(observed_gaps, anchor_stratum, weighted=weighted)
 
     random_true_batch = rng.integers(0, n, size=(n_permutations, n))
     permuted_gaps_batch = _per_anchor_gap_batch(similarity_matrix, random_true_batch)
-    permuted_gaps = _combine_by_stratum_batch(permuted_gaps_batch, anchor_stratum, weighted)
+    permuted_gaps = _combine_by_stratum_batch(
+        permuted_gaps_batch, anchor_stratum, weighted=weighted
+    )
 
     p_value = (np.sum(permuted_gaps >= observed) + 1) / (n_permutations + 1)
     null_std = permuted_gaps.std(ddof=1)
     z_score = (observed - permuted_gaps.mean()) / null_std if null_std > 0 else float("nan")
     return PermutationResult(observed_gap=observed, p_value=float(p_value), z_score=float(z_score))
-
-
-def paired_bootstrap_mrr_diff(
-    ranks_a: Sequence[float] | np.ndarray,
-    ranks_b: Sequence[float] | np.ndarray,
-    n_resamples: int = 10000,
-    rng: np.random.Generator | None = None,
-    clusters: Sequence[object] | np.ndarray | None = None,
-) -> BootstrapResult:
-    """Bootstrap CI for the paired MRR difference; `clusters` switches to a block bootstrap."""
-    rng = rng if rng is not None else np.random.default_rng()
-    a = np.asarray(ranks_a, dtype=float)
-    b = np.asarray(ranks_b, dtype=float)
-    n = len(a)
-
-    observed_diff = mean_reciprocal_rank(a) - mean_reciprocal_rank(b)
-    diffs = np.empty(n_resamples)
-
-    if clusters is None:
-        for i in range(n_resamples):
-            sample = rng.integers(0, n, size=n)
-            diffs[i] = mean_reciprocal_rank(a[sample]) - mean_reciprocal_rank(b[sample])
-    else:
-        clusters_arr = np.asarray(clusters)
-        groups = [np.flatnonzero(clusters_arr == value) for value in np.unique(clusters_arr)]
-        n_groups = len(groups)
-        for i in range(n_resamples):
-            chosen = rng.integers(0, n_groups, size=n_groups)
-            sample = np.concatenate([groups[c] for c in chosen])
-            diffs[i] = mean_reciprocal_rank(a[sample]) - mean_reciprocal_rank(b[sample])
-
-    ci_low, ci_high = np.percentile(diffs, [2.5, 97.5])
-    below = (np.sum(diffs <= 0) + 1) / (n_resamples + 1)
-    above = (np.sum(diffs >= 0) + 1) / (n_resamples + 1)
-    p_value = min(2 * min(below, above), 1.0)
-    return BootstrapResult(
-        observed_diff=float(observed_diff),
-        ci_low=float(ci_low),
-        ci_high=float(ci_high),
-        p_value=float(p_value),
-    )

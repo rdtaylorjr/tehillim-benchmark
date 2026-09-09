@@ -1,5 +1,4 @@
-# OS generated files #
-######################
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -7,8 +6,10 @@
 .Trashes
 Thumbs.db
 
-# Python #
-##########
+*claude*
+AGENTS.md
+
+# Python
 __pycache__/
 *.pyc
 .venv/
@@ -17,12 +18,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .idea/
-results/
 .coverage
 coverage.json
 htmlcov/
-*claude*
 
-# Extracted full text from copyrighted PDFs. NEVER commit: this repo is public.
-# Regenerable from Zotero with tools/extraction/extract.py
+# Repo-specific
+results/
 corpus-cache/

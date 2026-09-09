@@ -39,9 +39,7 @@ def test_reconstruct_groups_rebuilds_a_simple_couplet() -> None:
 
 
 def test_reconstruct_groups_disambiguates_two_instances_sharing_one_group_range() -> None:
-    """Ps 52:3: two independent A-B couplets share the same group_range string; distinct
-    group_id values must keep them as two separate groups, not merge into one.
-    """
+    """Two couplets sharing a group_range must stay separate groups via distinct group_id."""
     node_values = {
         200: {
             "parallel_group_id": "0",
@@ -90,9 +88,7 @@ def test_reconstruct_groups_disambiguates_two_instances_sharing_one_group_range(
 
 
 def test_reconstruct_groups_collapses_a_member_spanning_two_nodes() -> None:
-    """A member spanning two cola is emitted at both nodes with the same member_id; it
-    must reconstruct as one occurrence with two nodes, not two separate members.
-    """
+    """A member spanning two half-verses reconstructs as one occurrence with two nodes."""
     node_values = {
         1: {
             "parallel_group_id": "0",
@@ -122,9 +118,7 @@ def test_reconstruct_groups_collapses_a_member_spanning_two_nodes() -> None:
 
 
 def test_reconstruct_groups_reads_position_aligned_multi_occurrence_nodes_in_order() -> None:
-    """A node touched by two distinct groups: entries at that node must be split by position,
-    not confused with each other, even though they share one physical node.
-    """
+    """A node touched by two distinct groups: entries at that node must be split by position."""
     node_values = {
         300: {
             "parallel_group_id": "0; 1",

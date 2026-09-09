@@ -4,12 +4,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from parallelism.scripts.export_detail import load_cached_detail
+from library.incremental_cache import load_cached_parquet_set
+from parallelism.scripts.export_detail import _OUTPUT_FILES
 
 
 class TestLoadCachedDetail:
     def test_returns_empty_when_no_prior_output_exists(self, tmp_path: Path) -> None:
-        rows_by_file, models = load_cached_detail(tmp_path)
+        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
         assert rows_by_file == [[], [], []]
         assert models == set()
@@ -25,7 +26,7 @@ class TestLoadCachedDetail:
             tmp_path / "type_vs_baseline.parquet"
         )
 
-        rows_by_file, models = load_cached_detail(tmp_path)
+        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
         assert models == {"a", "b"}
         assert len(rows_by_file) == 3
@@ -34,7 +35,7 @@ class TestLoadCachedDetail:
     def test_returns_empty_when_only_some_output_files_exist(self, tmp_path: Path) -> None:
         pd.DataFrame({"model": ["a"], "x": [1]}).to_parquet(tmp_path / "pair_detail.parquet")
 
-        rows_by_file, models = load_cached_detail(tmp_path)
+        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
         assert rows_by_file == [[], [], []]
         assert models == set()

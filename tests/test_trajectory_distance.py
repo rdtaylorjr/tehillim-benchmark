@@ -73,7 +73,7 @@ def test_dtw_curve_distance_is_symmetric() -> None:
 
 
 def test_structural_distance_dtw_is_zero_for_a_stretched_repeat_of_the_same_pattern() -> None:
-    """B holds A's middle cola for an extra step: DTW should align them with zero residual."""
+    """B holds A's middle half-verses an extra step: DTW should align them with no residual."""
     a = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]])
     b = np.array([[1.0, 0.0], [0.0, 1.0], [0.0, 1.0], [1.0, 0.0]])
 
