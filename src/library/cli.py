@@ -31,6 +31,14 @@ def add_embeddings_dir_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("embeddings_dir", type=Path)
 
 
+def add_shuffle_family_arguments(parser: argparse.ArgumentParser) -> None:
+    """The construction a shuffle control draws from, and the tables its vocabulary needs."""
+    from families.shuffle import FAMILIES
+
+    parser.add_argument("--family", required=True, choices=sorted(FAMILIES), metavar="KEY")
+    parser.add_argument("--config-root", type=Path, required=True)
+
+
 def add_scoring_arguments(
     parser: argparse.ArgumentParser,
     *,

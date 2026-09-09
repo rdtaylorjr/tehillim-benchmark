@@ -12,6 +12,7 @@ dependencies = [
     "pyarrow>=17.0",
     "scikit-learn>=1.4",
     "numba>=0.60",
+    "embeddings>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,9 @@ dev = [
 
 [tool.deptry]
 known_first_party = ["genre", "library", "parallelism", "trajectory", "ui_export", "tools"]
+
+[tool.deptry.package_module_name_map]
+embeddings = ["core", "families", "lexical", "morphological", "syntactic", "semantic"]
 
 [tool.deptry.per_rule_ignores]
 # Tools CI invokes, so none of them is ever imported by this package.

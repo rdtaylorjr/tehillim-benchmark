@@ -5,12 +5,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from conftest import _write_embeddings_parquet as _write_parquet
+from core.export import write_sparse_vectors
 
 from library.embeddings import (
     dataset_identifier,
+    drop_zero_norm_vectors,
     is_sparse_embeddings,
     load_embeddings,
     load_sparse_embeddings,
+    sparse_vectors_to_csr,
     split_model_name,
 )
 from library.errors import BenchmarkDataError
@@ -149,6 +152,58 @@ def test_load_sparse_embeddings_matches_a_reconstructed_dense_matrix(tmp_path: P
         np.testing.assert_allclose(
             matrix[i].toarray().ravel(), dense_expected[node], rtol=0, atol=1e-6
         )
+
+
+def test_drop_zero_norm_vectors_keeps_what_load_embeddings_keeps(tmp_path: Path) -> None:
+    """A fused dense control must drop the same rows the Parquet reader drops."""
+    vectors = {
+        7: np.array([4.0, 5.0], dtype="<f4"),
+        8: np.zeros(2, dtype="<f4"),
+        9: np.array([1.0, -2.0], dtype="<f4"),
+    }
+    path = tmp_path / "dense.parquet"
+    _write_parquet(path, {node: vector.tolist() for node, vector in vectors.items()})
+
+    kept = drop_zero_norm_vectors(vectors)
+    from_file = load_embeddings(path)
+
+    assert sorted(kept) == sorted(from_file)
+    assert all(np.array_equal(kept[node], from_file[node]) for node in kept)
+
+
+def test_sparse_vectors_to_csr_matches_writing_a_draw_and_reading_it_back(tmp_path: Path) -> None:
+    """A fused null control must see exactly what a written-then-read shuffle draw would give."""
+    rng = np.random.default_rng(0)
+    dim = 500
+    # Built in descending node order, so a sort the writer applies and the reader relies on shows.
+    sparse_vectors = {
+        node: (
+            np.sort(rng.choice(dim, size=4, replace=False)).astype(np.int32),
+            rng.uniform(0.1, 5.0, size=4).astype("<f4"),
+        )
+        for node in range(110, 100, -1)
+    }
+    path = tmp_path / "draw.parquet"
+    write_sparse_vectors(path, sparse_vectors, dim, "one shuffle draw")
+
+    written_ids, written_matrix = load_sparse_embeddings(path)
+    memory_ids, memory_matrix = sparse_vectors_to_csr(sparse_vectors, dim)
+
+    assert memory_ids == written_ids
+    assert np.array_equal(memory_matrix.toarray(), written_matrix.toarray())
+
+
+def test_sparse_vectors_to_csr_drops_a_node_with_no_nonzero_entries() -> None:
+    empty = np.zeros(0, dtype=np.int32)
+    sparse_vectors = {
+        7: (np.array([2], dtype=np.int32), np.array([1.0], dtype="<f4")),
+        8: (empty, empty),
+    }
+
+    node_ids, matrix = sparse_vectors_to_csr(sparse_vectors, dim=10)
+
+    assert node_ids == [7]
+    assert matrix.shape == (1, 10)
 
 
 def test_dataset_identifier_reads_model_and_variation_from_the_hive_path() -> None:

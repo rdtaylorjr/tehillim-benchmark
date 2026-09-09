@@ -5,7 +5,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from conftest import _write_embeddings_parquet
 
-from library.psalm_vectors import is_sparse_embeddings, load_psalm_vectors
+from library.psalm_vectors import draw_psalm_vectors, is_sparse_embeddings, load_psalm_vectors
 
 
 def _sparse(path: Path, vectors: dict[int, list[float]], dim: int) -> None:
@@ -70,3 +70,52 @@ def test_load_psalm_vectors_skips_a_psalm_missing_one_of_its_half_verses(tmp_pat
     centroids = load_psalm_vectors(path, {1: [10, 11], 3: [10, 999]})
 
     assert sorted(centroids) == [1]
+
+
+def _dense_draw(vectors: dict[int, list[float]]) -> dict[int, np.ndarray]:
+    return {node: np.array(values, dtype="<f4") for node, values in vectors.items()}
+
+
+def _sparse_draw(vectors: dict[int, list[float]]) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    return {
+        node: (
+            np.array([i for i, value in enumerate(values) if value], dtype=np.int32),
+            np.array([value for value in values if value], dtype="<f4"),
+        )
+        for node, values in vectors.items()
+    }
+
+
+def test_draw_psalm_vectors_pools_a_dense_draw_as_its_written_file_pools(tmp_path: Path) -> None:
+    path = tmp_path / "d.parquet"
+    _write_embeddings_parquet(path, VECTORS)
+
+    built = draw_psalm_vectors(_dense_draw(VECTORS), None, HALF_VERSES)
+    from_file = load_psalm_vectors(path, HALF_VERSES)
+
+    assert sorted(built) == sorted(from_file)
+    assert all(np.array_equal(built[psalm], from_file[psalm]) for psalm in from_file)
+
+
+def test_draw_psalm_vectors_pools_a_sparse_draw_as_its_written_file_pools(tmp_path: Path) -> None:
+    path = tmp_path / "s.parquet"
+    _sparse(path, VECTORS, dim=3)
+
+    built = draw_psalm_vectors(_sparse_draw(VECTORS), 3, HALF_VERSES)
+    from_file = load_psalm_vectors(path, HALF_VERSES)
+
+    assert sorted(built) == sorted(from_file)
+    assert all(np.array_equal(built[psalm], from_file[psalm]) for psalm in from_file)
+
+
+def test_draw_psalm_vectors_drops_a_zero_norm_vector_the_reader_would_drop(tmp_path: Path) -> None:
+    """A written zero row never comes back, so a built one must not reach a centroid either."""
+    vectors = {**VECTORS, 12: [0.0, 0.0, 0.0]}
+    path = tmp_path / "d.parquet"
+    _write_embeddings_parquet(path, vectors)
+
+    built = draw_psalm_vectors(_dense_draw(vectors), None, {1: [10, 11, 12], 2: [20]})
+    from_file = load_psalm_vectors(path, {1: [10, 11, 12], 2: [20]})
+
+    assert sorted(built) == sorted(from_file)
+    assert all(np.array_equal(built[psalm], from_file[psalm]) for psalm in from_file)

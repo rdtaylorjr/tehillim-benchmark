@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import csv
 import json
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+from families.shuffle import Draws, build_lexical, by_psalm
+from lexical.corpus import LexicalPsalm
+from lexical.positional import positional_icf_vectors
+from lexical.psalm_zoning import psalm_position_mean_vectors
 
 from genre.scripts import build_master_report as genre_build_master_report
 from genre.scripts import compare_by_genre as genre_compare_by_genre
@@ -412,7 +417,6 @@ class TestGenreShuffleOrderControl:
         self,
         genre_csv: Path,
         embeddings_dir: Path,
-        shuffled_embeddings_dir: Path,
         tmp_path: Path,
         bhsa_api_over,
     ) -> None:
@@ -423,7 +427,10 @@ class TestGenreShuffleOrderControl:
             [
                 str(genre_csv),
                 str(real),
-                str(shuffled_embeddings_dir),
+                "--family",
+                "lexical/homograph/icf_position_mean_psalm",
+                "--config-root",
+                str(tmp_path),
                 "--output",
                 str(output),
                 "--workers",
@@ -432,16 +439,51 @@ class TestGenreShuffleOrderControl:
                 str(N_SHUFFLE_DRAWS),
             ],
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
+            draws_factory=_fake_lexical_draws,
         )
 
         assert set(pd.read_csv(output)["genre"]) == {"lament", "praise"}
+
+
+#: Distinct enough per half-verse that a permutation moves the vectors it is meant to move.
+_DRAW_VOCABULARY = ("A/", "B/", "C/", "D/")
+
+_DRAW_BUILDERS = {
+    "lexical/homograph/icf_position4": partial(positional_icf_vectors, k=4),
+    "lexical/homograph/icf_position_mean_psalm": psalm_position_mean_vectors,
+}
+
+
+def _fake_lexical_draws(family: str, _config_root: Path) -> Draws:
+    """Draws over the annotated half-verses, so the fused control needs no BHSA load."""
+    psalms = tuple(
+        LexicalPsalm(
+            number=psalm,
+            half_verse_nodes=tuple(nodes),
+            #: Rotated by psalm, so two psalms never share a vector and the AUC is not degenerate.
+            half_verse_lexemes=tuple(
+                (_DRAW_VOCABULARY[(psalm + i) % len(_DRAW_VOCABULARY)],) for i in range(len(nodes))
+            ),
+            half_verse_forms=tuple(
+                (_DRAW_VOCABULARY[(psalm + i) % len(_DRAW_VOCABULARY)],) for i in range(len(nodes))
+            ),
+        )
+        for psalm, nodes in HALF_VERSES.items()
+    )
+    weights = {value: 1.0 + index for index, value in enumerate(_DRAW_VOCABULARY)}
+    return Draws(
+        key=family,
+        psalms=psalms,
+        permute=by_psalm,
+        build=partial(build_lexical, _DRAW_BUILDERS[family], _DRAW_VOCABULARY, weights),
+        sparse_width=None,
+    )
 
 
 class TestParallelismShuffleOrderControl:
     def test_writes_the_real_against_shuffled_comparison(
         self,
         embeddings_dir: Path,
-        shuffled_embeddings_dir: Path,
         tmp_path: Path,
         parallel_bhsa_api_over,
     ) -> None:
@@ -451,7 +493,10 @@ class TestParallelismShuffleOrderControl:
         parallelism_shuffle_order_control.main(
             [
                 str(real),
-                str(shuffled_embeddings_dir),
+                "--family",
+                "lexical/homograph/icf_position4",
+                "--config-root",
+                str(tmp_path),
                 "--output",
                 str(output),
                 "--workers",
@@ -460,6 +505,7 @@ class TestParallelismShuffleOrderControl:
                 str(N_SHUFFLE_DRAWS),
             ],
             api_factory=lambda _checkout: parallel_bhsa_api_over(HALF_VERSES, PARALLEL_ANNOTATIONS),
+            draws_factory=_fake_lexical_draws,
         )
 
         assert "delta_order" in pd.read_csv(output).columns

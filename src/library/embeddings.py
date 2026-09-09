@@ -1,5 +1,6 @@
 """Reads BHSA-node-keyed embedding vectors from tehillim-embeddings' Parquet files."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,9 @@ import scipy.sparse as sp
 from library.errors import BenchmarkDataError
 
 TEXT_VARIANTS = ("consonantal", "vocalized", "cantillation")
+
+#: One node's nonzero entries, as the lists Parquet returns or as the arrays a builder produces.
+type SparseRows = Sequence[Sequence[float] | np.ndarray]
 
 
 def dataset_identifier(path: Path) -> str:
@@ -61,14 +65,40 @@ def load_embeddings(path: Path) -> dict[int, np.ndarray]:
     return {int(node_ids[i]): matrix[i] for i in np.flatnonzero(nonzero)}
 
 
+def drop_zero_norm_vectors(node_vectors: dict[int, np.ndarray]) -> dict[int, np.ndarray]:
+    """The rows load_embeddings keeps, for dense vectors that never went through Parquet."""
+    return {node: vector for node, vector in node_vectors.items() if np.any(vector)}
+
+
 def load_sparse_embeddings(path: Path) -> tuple[list[int], sp.csr_matrix]:
     """Reads a sparse Parquet embeddings file: node ids in row order, and one CSR matrix."""
     table = pq.read_table(path, columns=["node_id", "indices", "values"])
-    dim = int(table.schema.metadata[b"dim"])
-    node_ids = table["node_id"].to_pylist()
-    indices_col = table["indices"].to_pylist()
-    values_col = table["values"].to_pylist()
+    return sparse_rows_to_csr(
+        table["node_id"].to_pylist(),
+        table["indices"].to_pylist(),
+        table["values"].to_pylist(),
+        int(table.schema.metadata[b"dim"]),
+    )
 
+
+def sparse_vectors_to_csr(
+    sparse_vectors: dict[int, tuple[np.ndarray, np.ndarray]], dim: int
+) -> tuple[list[int], sp.csr_matrix]:
+    """The rows a written-then-read sparse dataset yields, without the Parquet round trip."""
+    #: The writer sorts node ids, so a fused reader sorts too or it sees a different row order.
+    node_ids = sorted(sparse_vectors)
+    return sparse_rows_to_csr(
+        node_ids,
+        [sparse_vectors[node][0] for node in node_ids],
+        [sparse_vectors[node][1] for node in node_ids],
+        dim,
+    )
+
+
+def sparse_rows_to_csr(
+    node_ids: list[int], indices_col: SparseRows, values_col: SparseRows, dim: int
+) -> tuple[list[int], sp.csr_matrix]:
+    """One CSR matrix from per-node index and value rows, dropping rows carrying no nonzeros."""
     row_lengths = [len(indices) for indices in indices_col]
     indptr = np.concatenate([[0], np.cumsum(row_lengths)])
     flat_indices = (

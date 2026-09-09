@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import numpy as np
 from conftest import _write_embeddings_parquet as _write_parquet
+from families.shuffle import Draws
 
 from parallelism.pairs import build_retrieval_pairs
-from parallelism.scripts.shuffle_order_control import score_separation_auc
+from parallelism.scripts.shuffle_order_control import score_built_seed, score_separation_auc
 from parallelism.tf_features import ReconstructedGroup
 
 
@@ -95,3 +97,58 @@ class TestScoreSeparationAuc:
         auc = score_separation_auc(path, pairs)
 
         assert auc == 1.0
+
+
+def _draws(vectors: dict[int, object], sparse_width: int | None) -> Draws:
+    """A registry entry whose every seed builds the same vectors, so a score is comparable."""
+    return Draws(
+        key="test/family/construction",
+        psalms=(),
+        permute=lambda psalms, seed: {},
+        build=lambda psalms, order: vectors,
+        sparse_width=sparse_width,
+    )
+
+
+def _sparse(vectors: dict[int, list[float]]) -> dict[int, tuple[np.ndarray, np.ndarray]]:
+    return {
+        node: (
+            np.array([i for i, value in enumerate(values) if value], dtype=np.int32),
+            np.array([value for value in values if value], dtype="<f4"),
+        )
+        for node, values in vectors.items()
+    }
+
+
+#: Two aligned couplets, so the AUC over them is defined and identical in either layout.
+BUILT_VECTORS = {1: [1.0, 0.0], 2: [1.0, 0.0], 3: [0.0, 1.0], 4: [0.0, 1.0]}
+
+
+class TestScoreBuiltSeed:
+    """The fused control scores a draw it built, which must match the file it replaces."""
+
+    def _pairs(self) -> list[object]:
+        return build_retrieval_pairs(
+            [
+                _group("AB", (0, 1), ("A", "B"), ((1,), (2,)), group_range="g1"),
+                _group("AB", (0, 1), ("A", "B"), ((3,), (4,)), group_range="g2"),
+            ]
+        )
+
+    def test_scores_a_dense_draw_as_it_scores_the_written_file(self, tmp_path: Path) -> None:
+        pairs = self._pairs()
+        path = tmp_path / "embeddings.parquet"
+        _write_parquet(path, BUILT_VECTORS)
+        dense = {node: np.array(values, dtype="<f4") for node, values in BUILT_VECTORS.items()}
+
+        built = score_built_seed(_draws(dense, None), pairs, seed=1)
+
+        assert built == score_separation_auc(path, pairs)
+
+    def test_scores_a_sparse_draw_as_it_scores_the_dense_draw_it_matches(self) -> None:
+        pairs = self._pairs()
+        dense = {node: np.array(values, dtype="<f4") for node, values in BUILT_VECTORS.items()}
+
+        sparse = score_built_seed(_draws(_sparse(BUILT_VECTORS), 2), pairs, seed=1)
+
+        assert sparse == score_built_seed(_draws(dense, None), pairs, seed=1)

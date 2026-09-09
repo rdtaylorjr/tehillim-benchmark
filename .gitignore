@@ -23,5 +23,6 @@ coverage.json
 htmlcov/
 
 # Repo-specific
+RERUN.md
 results/
 corpus-cache/

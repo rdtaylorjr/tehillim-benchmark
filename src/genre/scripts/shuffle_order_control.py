@@ -8,15 +8,19 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from families.shuffle import Draws, draw, load_draws
 
 from genre.evaluate import evaluate_genre_discrimination
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs, filter_pairs_by_genre
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
-from library.cli import add_genre_csv_argument, add_scoring_arguments
+from library.cli import (
+    add_genre_csv_argument,
+    add_scoring_arguments,
+    add_shuffle_family_arguments,
+)
 from library.order_shuffle import order_shuffle_result
-from library.psalm_vectors import load_psalm_vectors
-from library.shuffle_draws import select_shuffle_draws
+from library.psalm_vectors import draw_psalm_vectors, load_psalm_vectors
 from library.worker_pool import map_in_order
 
 
@@ -27,21 +31,53 @@ def score_genre_ap(
     genres: list[str],
 ) -> dict[str, float]:
     """Per-genre Average Precision (no permutation testing) for one embeddings file."""
-    vectors = load_psalm_vectors(path, half_verses_by_psalm)
+    return genre_ap(load_psalm_vectors(path, half_verses_by_psalm), pairs, genres)
+
+
+def genre_ap(
+    psalm_vectors: dict[int, np.ndarray], pairs: list[GenrePair], genres: list[str]
+) -> dict[str, float]:
+    """Per-genre Average Precision over psalm centroids already in memory, file or freshly built."""
     return {
         genre: evaluate_genre_discrimination(
-            filter_pairs_by_genre(pairs, genre), vectors
+            filter_pairs_by_genre(pairs, genre), psalm_vectors
         ).average_precision
         for genre in genres
     }
 
 
+def score_built_seed(
+    draws: Draws,
+    half_verses_by_psalm: dict[int, list[int]],
+    pairs: list[GenrePair],
+    genres: list[str],
+    seed: int,
+) -> dict[str, float]:
+    """Builds one seed's draw, scores it, and releases the vectors before the next seed."""
+    vectors = draw_psalm_vectors(draw(draws, seed), draws.sparse_width, half_verses_by_psalm)
+    return genre_ap(vectors, pairs, genres)
+
+
+def built_null_scores(
+    draws: Draws,
+    n_shuffles: int,
+    half_verses_by_psalm: dict[int, list[int]],
+    pairs: list[GenrePair],
+    genres: list[str],
+    workers: int | None,
+) -> list[dict[str, float]]:
+    """One per-genre score set per seed, each draw built in memory and never written to a file."""
+    seeds = list(range(1, n_shuffles + 1))
+    score = partial(score_built_seed, draws, half_verses_by_psalm, pairs, genres)
+    return map_in_order(score, seeds, workers)
+
+
 def shuffled_scores_by_genre(
-    scores_by_file: list[dict[str, float]], genres: list[str]
+    scores_by_seed: list[dict[str, float]], genres: list[str]
 ) -> dict[str, np.ndarray]:
-    """Transposes per-file genre scores into one null array per genre, keeping file order."""
+    """Transposes per-seed genre scores into one null array per genre, keeping seed order."""
     return {
-        genre: np.array([scores[genre] for scores in scores_by_file], dtype=float)
+        genre: np.array([scores[genre] for scores in scores_by_seed], dtype=float)
         for genre in genres
     }
 
@@ -50,12 +86,13 @@ def main(
     argv: list[str] | None = None,
     *,
     api_factory: Callable[[str], Any] = load_bhsa_api,
+    draws_factory: Callable[[str, Path], Draws] = load_draws,
 ) -> None:
     """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_genre_csv_argument(parser)
     parser.add_argument("real_embeddings", type=Path)
-    parser.add_argument("shuffled_embeddings_dir", type=Path)
+    add_shuffle_family_arguments(parser)
     add_scoring_arguments(parser, with_shuffles=True)
     args = parser.parse_args(argv)
 
@@ -66,13 +103,15 @@ def main(
     genres = sorted(set(genre_by_psalm.values()))
 
     real_ap = score_genre_ap(args.real_embeddings, half_verses_by_psalm, pairs, genres)
-    shuffled_paths = select_shuffle_draws(args.shuffled_embeddings_dir, args.n_shuffles)
-    score = partial(
-        score_genre_ap, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs, genres=genres
+    per_seed = built_null_scores(
+        draws_factory(args.family, args.config_root),
+        args.n_shuffles,
+        half_verses_by_psalm,
+        pairs,
+        genres,
+        args.workers,
     )
-    shuffled_ap = shuffled_scores_by_genre(
-        map_in_order(score, shuffled_paths, args.workers), genres
-    )
+    shuffled_ap = shuffled_scores_by_genre(per_seed, genres)
 
     rows = []
     for genre in genres:
