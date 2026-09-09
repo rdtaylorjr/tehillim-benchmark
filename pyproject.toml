@@ -35,8 +35,10 @@ DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture"]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+#: tools/ is importable only when installed, so the pytest console script resolves it like src/.
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["genre*", "library*", "parallelism*", "trajectory*", "ui_export*", "tools*"]
 
 [tool.ruff]
 line-length = 100
