@@ -47,6 +47,17 @@ def is_sparse_embeddings(path: Path) -> bool:
     return "vector" not in pq.read_schema(path).names
 
 
+def read_dense_rows(path: Path) -> dict[int, np.ndarray]:
+    """Every row of a dense file, keeping an all-zero vector as the value it is."""
+    table = pq.read_table(path, columns=["node_id", "vector"])
+    node_ids = table["node_id"].to_numpy(zero_copy_only=False)
+    vector_column = table["vector"].combine_chunks()
+    dim = vector_column.type.list_size
+    matrix = vector_column.values.to_numpy(zero_copy_only=False).astype("<f4", copy=False)
+    matrix = matrix.reshape(len(node_ids), dim)
+    return {int(node_ids[i]): matrix[i] for i in range(len(node_ids))}
+
+
 def load_embeddings(path: Path) -> dict[int, np.ndarray]:
     """Reads a Parquet embeddings file into a {node: vector} map, excluding zero-norm vectors."""
     if is_sparse_embeddings(path):
@@ -54,15 +65,7 @@ def load_embeddings(path: Path) -> dict[int, np.ndarray]:
         node_ids, matrix = load_sparse_embeddings(path)
         dense = matrix.toarray().astype("<f4", copy=False)
         return {node: dense[i] for i, node in enumerate(node_ids)}
-
-    table = pq.read_table(path, columns=["node_id", "vector"])
-    node_ids = table["node_id"].to_numpy(zero_copy_only=False)
-    vector_column = table["vector"].combine_chunks()
-    dim = vector_column.type.list_size
-    matrix = vector_column.values.to_numpy(zero_copy_only=False).astype("<f4", copy=False)
-    matrix = matrix.reshape(len(node_ids), dim)
-    nonzero = np.any(matrix, axis=1)
-    return {int(node_ids[i]): matrix[i] for i in np.flatnonzero(nonzero)}
+    return drop_zero_norm_vectors(read_dense_rows(path))
 
 
 def drop_zero_norm_vectors(node_vectors: dict[int, np.ndarray]) -> dict[int, np.ndarray]:
@@ -70,8 +73,8 @@ def drop_zero_norm_vectors(node_vectors: dict[int, np.ndarray]) -> dict[int, np.
     return {node: vector for node, vector in node_vectors.items() if np.any(vector)}
 
 
-def load_sparse_embeddings(path: Path) -> tuple[list[int], sp.csr_matrix]:
-    """Reads a sparse Parquet embeddings file: node ids in row order, and one CSR matrix."""
+def read_sparse_rows(path: Path) -> tuple[list[int], sp.csr_matrix]:
+    """Every row of a sparse file, keeping a half-verse carrying no nonzeros as the value it is."""
     table = pq.read_table(path, columns=["node_id", "indices", "values"])
     return sparse_rows_to_csr(
         table["node_id"].to_pylist(),
@@ -81,10 +84,15 @@ def load_sparse_embeddings(path: Path) -> tuple[list[int], sp.csr_matrix]:
     )
 
 
-def sparse_vectors_to_csr(
+def load_sparse_embeddings(path: Path) -> tuple[list[int], sp.csr_matrix]:
+    """Reads a sparse Parquet embeddings file: node ids in row order, and one CSR matrix."""
+    return drop_empty_rows(*read_sparse_rows(path))
+
+
+def sparse_rows_of(
     sparse_vectors: dict[int, tuple[np.ndarray, np.ndarray]], dim: int
 ) -> tuple[list[int], sp.csr_matrix]:
-    """The rows a written-then-read sparse dataset yields, without the Parquet round trip."""
+    """Every row a built draw carries, without the Parquet round trip and without dropping."""
     #: The writer sorts node ids, so a fused reader sorts too or it sees a different row order.
     node_ids = sorted(sparse_vectors)
     return sparse_rows_to_csr(
@@ -95,10 +103,17 @@ def sparse_vectors_to_csr(
     )
 
 
+def sparse_vectors_to_csr(
+    sparse_vectors: dict[int, tuple[np.ndarray, np.ndarray]], dim: int
+) -> tuple[list[int], sp.csr_matrix]:
+    """The rows a written-then-read sparse dataset yields, without the Parquet round trip."""
+    return drop_empty_rows(*sparse_rows_of(sparse_vectors, dim))
+
+
 def sparse_rows_to_csr(
     node_ids: list[int], indices_col: SparseRows, values_col: SparseRows, dim: int
 ) -> tuple[list[int], sp.csr_matrix]:
-    """One CSR matrix from per-node index and value rows, dropping rows carrying no nonzeros."""
+    """One CSR matrix from per-node index and value rows, keeping a row that carries none."""
     row_lengths = [len(indices) for indices in indices_col]
     indptr = np.concatenate([[0], np.cumsum(row_lengths)])
     flat_indices = (
@@ -111,7 +126,10 @@ def sparse_rows_to_csr(
         if any(row_lengths)
         else np.zeros(0, dtype="<f4")
     )
-    matrix = sp.csr_matrix((flat_values, flat_indices, indptr), shape=(len(node_ids), dim))
+    return node_ids, sp.csr_matrix((flat_values, flat_indices, indptr), shape=(len(node_ids), dim))
 
-    nonzero_rows = np.flatnonzero(np.diff(matrix.indptr) > 0)
-    return [node_ids[i] for i in nonzero_rows], matrix[nonzero_rows]
+
+def drop_empty_rows(node_ids: list[int], matrix: sp.csr_matrix) -> tuple[list[int], sp.csr_matrix]:
+    """The rows a node-level cosine can use, since a row with no nonzeros has no direction."""
+    kept = np.flatnonzero(np.diff(matrix.indptr) > 0)
+    return [node_ids[i] for i in kept], matrix[kept]

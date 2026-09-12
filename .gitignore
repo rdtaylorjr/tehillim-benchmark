@@ -26,3 +26,6 @@ htmlcov/
 RERUN.md
 results/
 corpus-cache/
+
+*.md
+!README.md

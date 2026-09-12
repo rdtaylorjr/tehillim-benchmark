@@ -23,7 +23,7 @@ __all__ = ["RedundancyResult", "conditional_redundancy", "joined_vectors"]
 
 @dataclass(frozen=True, slots=True)
 class RedundancyResult:
-    """One pair of representations, each scored alone and together on a shared colon population."""
+    """One pair of representations, each scored alone and together on the half-verses they share."""
 
     subject: str
     reference: str
@@ -38,7 +38,7 @@ class RedundancyResult:
 def joined_vectors(
     subject: dict[int, np.ndarray], reference: dict[int, np.ndarray]
 ) -> dict[int, np.ndarray]:
-    """Each colon's two vectors concatenated, both L2-normalised so neither width dominates."""
+    """Each half-verse's two vectors concatenated, both L2-normalised so neither width dominates."""
     shared = subject.keys() & reference.keys()
     joined: dict[int, np.ndarray] = {}
     for node in shared:
@@ -64,7 +64,7 @@ def _separation_auc(node_vectors: dict[int, np.ndarray], pairs: list[RetrievalPa
 def conditional_redundancy(
     subject_path: Path, reference_path: Path, pairs: list[RetrievalPair]
 ) -> RedundancyResult:
-    """Scores subject, reference and their join on the colons both representations cover."""
+    """Scores subject, reference and their join on the half-verses both representations cover."""
     subject = load_embeddings(subject_path)
     reference = load_embeddings(reference_path)
     joined = joined_vectors(subject, reference)

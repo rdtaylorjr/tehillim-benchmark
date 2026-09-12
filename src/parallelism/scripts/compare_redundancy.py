@@ -14,7 +14,7 @@ from parallelism.tf_features import load_api, read_node_feature_values, reconstr
 def compare_redundancy(
     subject_paths: list[Path], reference_paths: list[Path], pairs: list[Any]
 ) -> list[dict[str, str | int | float]]:
-    """Every subject scored against every reference, on the colons the two share."""
+    """Every subject scored against every reference, on the half-verses the two share."""
     rows: list[dict[str, str | int | float]] = []
     for reference_path in reference_paths:
         for subject_path in subject_paths:

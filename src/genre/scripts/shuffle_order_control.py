@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import math
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -10,7 +11,8 @@ from typing import Any
 import numpy as np
 from families.shuffle import Draws, draw, load_draws
 
-from genre.evaluate import evaluate_genre_discrimination
+from genre.bootstrap import psalm_similarity_matrix
+from genre.evaluate import evaluate_genre_discrimination_from_matrix
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs, filter_pairs_by_genre
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
@@ -19,6 +21,7 @@ from library.cli import (
     add_scoring_arguments,
     add_shuffle_family_arguments,
 )
+from library.errors import BenchmarkDataError
 from library.order_shuffle import order_shuffle_result
 from library.psalm_vectors import draw_psalm_vectors, load_psalm_vectors
 from library.worker_pool import map_in_order
@@ -35,15 +38,32 @@ def score_genre_ap(
 
 
 def genre_ap(
-    psalm_vectors: dict[int, np.ndarray], pairs: list[GenrePair], genres: list[str]
+    psalm_vectors: dict[int, np.ndarray],
+    pairs: list[GenrePair],
+    genres: list[str],
+    *,
+    similarity_matrix: Callable[..., np.ndarray] = psalm_similarity_matrix,
 ) -> dict[str, float]:
     """Per-genre Average Precision over psalm centroids already in memory, file or freshly built."""
+    psalm_ids = sorted(psalm_vectors)
+    index = {psalm: position for position, psalm in enumerate(psalm_ids)}
+    matrix = similarity_matrix(psalm_ids, psalm_vectors)
     return {
-        genre: evaluate_genre_discrimination(
-            filter_pairs_by_genre(pairs, genre), psalm_vectors
+        genre: evaluate_genre_discrimination_from_matrix(
+            filter_pairs_by_genre(pairs, genre), matrix, index
         ).average_precision
         for genre in genres
     }
+
+
+def require_scoreable(real_ap: dict[str, float], family: str) -> dict[str, float]:
+    """Refuses a family whose real embeddings score on no genre, which a null cannot control."""
+    if any(math.isfinite(ap) for ap in real_ap.values()):
+        return real_ap
+    raise BenchmarkDataError(
+        f"no genre could be scored for {family}: every psalm centroid was dropped, "
+        "so the shuffle null would compare NaN against NaN"
+    )
 
 
 def score_built_seed(
@@ -102,7 +122,9 @@ def main(
     pairs = build_genre_pairs(genre_by_psalm)
     genres = sorted(set(genre_by_psalm.values()))
 
-    real_ap = score_genre_ap(args.real_embeddings, half_verses_by_psalm, pairs, genres)
+    real_ap = require_scoreable(
+        score_genre_ap(args.real_embeddings, half_verses_by_psalm, pairs, genres), args.family
+    )
     per_seed = built_null_scores(
         draws_factory(args.family, args.config_root),
         args.n_shuffles,

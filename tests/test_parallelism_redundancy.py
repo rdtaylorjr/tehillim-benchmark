@@ -7,7 +7,7 @@ from parallelism.redundancy import joined_vectors
 
 
 class TestJoinedVectors:
-    def test_concatenates_both_representations_for_a_shared_colon(self):
+    def test_concatenates_both_representations_for_a_shared_half_verse(self):
         subject = {1: np.array([3.0, 4.0])}
         reference = {1: np.array([0.0, 5.0])}
 
@@ -25,7 +25,7 @@ class TestJoinedVectors:
         assert np.linalg.norm(joined[1][:2]) == pytest.approx(1.0)
         assert np.linalg.norm(joined[1][2:]) == pytest.approx(1.0)
 
-    def test_keeps_only_colons_both_representations_cover(self):
+    def test_keeps_only_half_verses_both_representations_cover(self):
         subject = {1: np.array([1.0]), 2: np.array([1.0])}
         reference = {2: np.array([1.0]), 3: np.array([1.0])}
 
@@ -40,5 +40,5 @@ class TestJoinedVectors:
         assert joined[1][:2].tolist() == [0.0, 0.0]
         assert np.linalg.norm(joined[1][2:]) == pytest.approx(1.0)
 
-    def test_no_shared_colon_yields_nothing(self):
+    def test_no_shared_half_verse_yields_nothing(self):
         assert joined_vectors({1: np.array([1.0])}, {2: np.array([1.0])}) == {}

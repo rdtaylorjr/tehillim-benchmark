@@ -1,15 +1,21 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from conftest import _write_embeddings_parquet as _write_parquet
 from families.shuffle import Draws
 
-from genre.pairs import build_genre_pairs
+from genre.bootstrap import psalm_similarity_matrix
+from genre.evaluate import evaluate_genre_discrimination
+from genre.pairs import build_genre_pairs, filter_pairs_by_genre
 from genre.scripts.shuffle_order_control import (
+    genre_ap,
+    require_scoreable,
     score_built_seed,
     score_genre_ap,
     shuffled_scores_by_genre,
 )
+from library.errors import BenchmarkDataError
 
 
 class TestScoreGenreAp:
@@ -141,3 +147,66 @@ class TestScoreBuiltSeed:
         assert sparse == score_built_seed(
             _draws(dense, None), HALF_VERSES_BY_PSALM, pairs, genres, seed=1
         )
+
+
+class TestGenreApSharesOneSimilarityMatrix:
+    """Every genre reads one psalm matrix, so a seed builds it once rather than once per genre."""
+
+    def _vectors(self) -> dict[int, np.ndarray]:
+        rng = np.random.default_rng(11)
+        return {psalm: rng.normal(size=48).astype("<f4") for psalm in range(1, 13)}
+
+    def _labels(self) -> dict[int, str]:
+        names = ["Lament", "Praise", "Hymn", "Royal"]
+        return {psalm: names[psalm % len(names)] for psalm in range(1, 13)}
+
+    def test_it_matches_scoring_each_genre_against_its_own_matrix(self) -> None:
+        """A shared matrix must not move a single value, since the arithmetic is unchanged."""
+        vectors = self._vectors()
+        pairs = build_genre_pairs(self._labels())
+        genres = sorted(set(self._labels().values()))
+
+        shared = genre_ap(vectors, pairs, genres)
+        per_genre = {
+            genre: evaluate_genre_discrimination(
+                filter_pairs_by_genre(pairs, genre), vectors
+            ).average_precision
+            for genre in genres
+        }
+
+        assert shared == per_genre
+
+    def test_the_matrix_is_built_once_no_matter_how_many_genres_are_scored(self) -> None:
+        builds: list[int] = []
+
+        def _counting_matrix(psalm_ids, psalm_vectors):  # type: ignore[no-untyped-def]
+            builds.append(len(psalm_ids))
+            return psalm_similarity_matrix(psalm_ids, psalm_vectors)
+
+        genres = sorted(set(self._labels().values()))
+        genre_ap(
+            self._vectors(),
+            build_genre_pairs(self._labels()),
+            genres,
+            similarity_matrix=_counting_matrix,
+        )
+
+        assert len(builds) == 1
+
+
+class TestUnscoreableFamilyIsRefused:
+    """A family no genre can be scored on must fail, since a NaN row reads as a finding."""
+
+    def test_all_nan_real_scores_raise_instead_of_being_written(self) -> None:
+        with pytest.raises(BenchmarkDataError, match="no genre could be scored"):
+            require_scoreable({"Lament": float("nan"), "Praise": float("nan")}, "syn/x/1_2gram")
+
+    def test_a_partly_scoreable_family_is_left_alone(self) -> None:
+        """One untestable genre is left to the multiple-comparison correction, the run goes on."""
+        scores = {"Lament": 0.3, "Praise": float("nan")}
+
+        assert require_scoreable(scores, "syn/x/1_2gram") == scores
+
+    def test_the_message_names_the_family_so_a_sweep_says_which_one_failed(self) -> None:
+        with pytest.raises(BenchmarkDataError, match="syntactic/phrase/subphrase_rela/1_2gram"):
+            require_scoreable({"Lament": float("nan")}, "syntactic/phrase/subphrase_rela/1_2gram")
