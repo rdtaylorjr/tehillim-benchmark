@@ -14,7 +14,9 @@ The data are operational annotations rather than neutral descriptions of poetic 
 
 ## Methodology
 
-The loader reconstructs each annotation group from the `parallel_*` features. It converts a group signature into member-slot relations, preserving adjacent relations within a segment and matching reordered letters in a chiasm. A relation is excluded when a member is unresolved, marked ambiguous, or resolves to the same half-verse as its counterpart. Single-member segments produce no within-segment relation under this rule. This converts a literary annotation into a finite set of reproducible retrieval observations while keeping the omitted cases identifiable.
+The loader reconstructs each annotation group from the `parallel_*` features. In a signature, a dash separates lines and a letter marks a member. Repeated letters mark members that correspond. The loader pairs every two members sharing a letter, whether across lines or within one. When no letter repeats, it pairs adjacent lines as wholes, taking the union of each line's members. A dashless signature pairs adjacent members.
+
+A pair is excluded when a member is unresolved or marked ambiguous, or when both sides resolve to the same half-verse set. Pairs within a group that resolve to the same node sets collapse to one. This projects a literary annotation onto a finite set of reproducible retrieval observations while preserving an audit trail for omitted cases.
 
 Average Precision is the primary outcome. Cosine similarity ranks annotated relations against adjacent, within-psalm half-verse pairs excluding nodes in surviving retrieval pairs. This local control retains generic adjacency and topical continuity. It does not create an unannotated nonparallel background because the source annotation covers most nodes. AUC, rank-based retrieval measures, similarity calibration against unmarked background nodes, and type-specific summaries remain secondary descriptions. Average Precision is reported with its positive-class prevalence because its scale depends on the true-to-control ratio.
 
@@ -28,18 +30,24 @@ Trajectory analysis retains half-verse order. It derives a psalm centroid, an or
 
 ## Results
 
-The current public interface payloads contain 148 parallelism variants and 222 genre variants, excluding order-shuffle draws. An earlier result-store summary reported 222 parallelism and 220 genre variants. The repository has no release manifest that reconciles those output versions. The following descriptive maxima identify variants in the public payloads.
+The public interface payloads contain 148 parallelism variants and 222 genre variants, excluding order-shuffle draws. An earlier result-store summary reported 222 parallelism and 220 genre variants. The repository has no release manifest that reconciles those output versions.
 
-| Domain | Parallelism maximum AP | Genre maximum AP |
-| --- | --- | --- |
-| Semantic | `kalm_embedding_gemma3_12b_2511_cantillation`, 0.395 | `gemini_embedding_2_cantillation`, 0.400 |
-| Syntactic | `phrase_subphrase_rela_1gram`, 0.384 | `phrase_marginal_typ_function`, 0.357 |
-| Morphological | `morph_prs_ps_sp_plus`, 0.383 | `morph_prs_ps_sp_plus`, 0.356 |
-| Lexical | `homograph_log_count`, 0.344 | `word_consonantal_icf_position_mean_psalm`, 0.460 |
+The published parallelism maxima were calculated under a superseded pairing rule that produced 1,110 relations, 755 within one annotated line. They are retained in the result store for provenance and are not reported here as findings for the current benchmark. The current rule produces 2,392 relations from 2,000 of 2,292 source groups. The current relation set therefore requires a versioned public release before its representation scores can be reported or compared.
 
-The semantic parallelism maximum is calculated from 1,110 annotated relations and 2,784 local control pairs, giving an AP prevalence of 0.285. The 2,292 source groups become this scored relation set through explicit losses: 790 groups produce no relation under the signature rule, while 2,292 of 3,450 generated candidate pairs resolve to one half-verse, 43 include an ambiguous member, and five lack a member. The local control includes an annotation-bearing node in 2,720 pairs. Only 64 adjacent bicola carry no `parallel_*` annotation. Genre outcomes use the 11,175 unordered psalm pairs. These maxima summarize different input families and class prevalences. They do not supply a common scale of linguistic adequacy or a model-selection rule.
+| Relation-construction audit | Count |
+| --- | ---: |
+| Source groups | 2,292 |
+| Groups yielding one or more relations | 2,000 |
+| Candidate pairs | 3,774 |
+| Candidate pairs with an ambiguous member | 38 |
+| Candidate pairs with a missing member | 6 |
+| Candidate pairs resolving to one half-verse set | 557 |
+| Collapsed element pairs duplicating a retained line pair | 781 |
+| Current retrieval relations | 2,392 |
 
-The result store also records a recurring negative pattern: all 43 semantic variants place the supplied Hymn class below AUC 0.5, with a mean AUC of 0.385 and a maximum of 0.469. This outcome warrants inspection of the source labels, the class composition, psalm length, and representation behavior. It does not establish that hymns lack a coherent literary profile.
+Of the 557 candidate pairs resolving to one half-verse set, 129 are line pairs whose two annotated lines fall within one accentual half-verse and 428 are element pairs within one half-verse. BHSA half-verse boundaries coincide with a clause boundary in 95.1 percent of cases, against a 28.7 percent base rate. This is descriptive agreement between two segmentations. It does not validate either segmentation or identify a poetic line independently of the annotation source. The local control includes an annotation-bearing node in 2,720 pairs. Only 64 adjacent bicola carry no `parallel_*` annotation. Genre outcomes use the 11,175 unordered psalm pairs.
+
+The result store records a recurring genre result: all 43 semantic variants place the supplied Hymn class below AUC 0.5, with a mean AUC of 0.385 and a maximum of 0.469. This outcome warrants inspection of the source labels, class composition, psalm length, and representation behavior. It does not establish that hymns lack a coherent literary profile.
 
 ## Limitations
 
@@ -51,7 +59,10 @@ A future confirmatory pass should fix representation choices on a predetermined 
 
 ## Reproducibility
 
-Python 3.10 or later and the dependencies in `pyproject.toml` are required. The BHSA checkout is pinned to `v1.8.1` and the Logos Text-Fabric module to `v1.0`. Unit tests run without licensed annotations or vector files. Integration runs require permitted access to the Logos features, the source genre CSV, a local embeddings checkout, and a writable data checkout. The scripts accept model names, input paths, seeds, control settings, and output partitions. The emitted public payloads do not yet carry a complete manifest of those inputs or a source-code revision. The result-version discrepancy above shows why a release manifest is necessary. Byte-identical reproduction depends on access to the same external annotation and model artifacts.
+Python 3.10 or later and the dependencies in `pyproject.toml` are required. The BHSA checkout is pinned to `v1.8.1` and the Logos Text-Fabric module to `v1.0`. Unit tests run without licensed annotations or vector files. Integration runs require permitted access to the Logos features, the source genre CSV, a local embeddings checkout, and a writable data checkout. The checked-in public payloads do not carry a complete manifest of their inputs or source revision. The result-version discrepancy above shows why a release manifest is necessary. Byte-identical reproduction also depends on the same external annotation and model artifacts.
+
+A Snakemake driver coordinates declared scoring and interface-export steps and writes manifests for
+the outputs it creates.
 
 Sparse `morph_signature` trigram partitions require the library's sparse evaluation path. The standard batch commands do not dispatch to that path.
 
@@ -65,7 +76,8 @@ python3 -m venv .venv
 
 ## Usage
 
-Run a benchmark script with an embeddings directory and a matching output directory in a local `tehillim-data` checkout.
+Run a benchmark script with an embeddings directory and a matching output directory in a local
+`tehillim-data` checkout:
 
 ```bash
 .venv/bin/python -m genre.scripts.compare_models \
