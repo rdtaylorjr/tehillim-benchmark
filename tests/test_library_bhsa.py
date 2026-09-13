@@ -21,12 +21,14 @@ def _stub_api() -> SimpleNamespace:
     return SimpleNamespace(F=object())
 
 
-def _fake_fabric_class(api: object):
-    """A fabric_class stand-in whose loadAll() always returns the given fake api."""
+def _fake_fabric_class(api: object, loaded: list[str] | None = None):
+    """A fabric_class stand-in whose load() records the feature string and returns the fake api."""
 
     def fake_fabric_class(*, locations: list[str], silent: str) -> object:
         class _FakeTF:
-            def loadAll(self, silent: str) -> object:  # noqa: N802
+            def load(self, features: str, silent: str) -> object:
+                if loaded is not None:
+                    loaded.append(features)
                 return api
 
         return _FakeTF()
@@ -223,7 +225,7 @@ class TestLoadBhsaApi:
             captured_locations.append(locations)
 
             class _FakeTF:
-                def loadAll(self, silent: str) -> object:  # noqa: N802
+                def load(self, features: str, silent: str) -> object:
                     return SimpleNamespace(F=object())
 
             return _FakeTF()
@@ -339,7 +341,7 @@ class TestBhsaCloneLocation:
             def __init__(self, locations, silent):
                 seen.append(locations)
 
-            def loadAll(self, silent):  # noqa: N802 -- Text-Fabric's own method name
+            def load(self, features, silent):
                 return SimpleNamespace(F=object())
 
         load_bhsa_api(fabric_class=RecordingFabric, env={"TEHILLIM_BHSA_PATH": str(tmp_path)})
@@ -355,7 +357,7 @@ class TestNonApiLocalResults:
             def __init__(self, locations, silent):
                 pass
 
-            def loadAll(self, silent):  # noqa: N802 -- Text-Fabric's own method name
+            def load(self, features, silent):
                 return False
 
         sentinel = SimpleNamespace(F=object())
@@ -372,7 +374,7 @@ class TestNonApiLocalResults:
             def __init__(self, locations, silent):
                 pass
 
-            def loadAll(self, silent):  # noqa: N802 -- Text-Fabric's own method name
+            def load(self, features, silent):
                 return False
 
         with pytest.raises(RuntimeError, match="failed to load BHSA"):
@@ -380,3 +382,28 @@ class TestNonApiLocalResults:
                 fabric_class=FalseFabric,
                 use_fn=lambda *a, **k: SimpleNamespace(api=False),
             )
+
+
+def test_the_local_clone_load_asks_for_the_benchmark_features_only() -> None:
+    """loadAll() holds every BHSA feature in memory, several gigabytes the benchmark never reads."""
+    from library.bhsa import LOADED_FEATURES
+
+    loaded: list[str] = []
+    load_bhsa_api(fabric_class=_fake_fabric_class(_stub_api(), loaded))
+    assert loaded == [LOADED_FEATURES]
+
+
+def test_every_feature_the_benchmark_reads_is_loaded() -> None:
+    """A script reading a feature outside the loaded set would fail only on real data."""
+    import re
+    from pathlib import Path
+
+    from library.bhsa import LOADED_FEATURES
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    read = set()
+    for path in src.rglob("*.py"):
+        read.update(re.findall(r"\bF\.([a-z_0-9]+)", path.read_text()))
+    loaded = set(LOADED_FEATURES.split()) | {"otype"}
+    module_features = {f for f in read if f.startswith("parallel_")}
+    assert read - module_features <= loaded, sorted(read - module_features - loaded)

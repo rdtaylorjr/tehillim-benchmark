@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import scipy.sparse as sp
 
@@ -47,14 +48,30 @@ def is_sparse_embeddings(path: Path) -> bool:
     return "vector" not in pq.read_schema(path).names
 
 
-def read_dense_rows(path: Path) -> dict[int, np.ndarray]:
-    """Every row of a dense file, keeping an all-zero vector as the value it is."""
-    table = pq.read_table(path, columns=["node_id", "vector"])
-    node_ids = table["node_id"].to_numpy(zero_copy_only=False)
-    vector_column = table["vector"].combine_chunks()
-    dim = vector_column.type.list_size
-    matrix = vector_column.values.to_numpy(zero_copy_only=False).astype("<f4", copy=False)
-    matrix = matrix.reshape(len(node_ids), dim)
+def release_arrow_memory() -> None:
+    """Hands Arrow's freed buffers back to the OS, so a batch over many files stays flat."""
+    pa.default_memory_pool().release_unused()
+
+
+#: Rows decoded per step, since Arrow's decode peak is a multiple of the slice it decodes.
+DENSE_BATCH_ROWS = 256
+
+
+def read_dense_rows(path: Path, batch_size: int = DENSE_BATCH_ROWS) -> dict[int, np.ndarray]:
+    """Every row of a dense file, decoded in batches into one float32 matrix, zero vectors kept."""
+    reader = pq.ParquetFile(path)
+    dim = reader.schema_arrow.field("vector").type.list_size
+    matrix = np.empty((reader.metadata.num_rows, dim), dtype="<f4")
+    node_ids = np.empty(reader.metadata.num_rows, dtype=np.int64)
+    start = 0
+    for batch in reader.iter_batches(batch_size=batch_size, columns=["node_id", "vector"]):
+        stop = start + batch.num_rows
+        node_ids[start:stop] = batch.column("node_id").to_numpy(zero_copy_only=False)
+        values = batch.column("vector").values.to_numpy(zero_copy_only=False)
+        matrix[start:stop] = values.reshape(batch.num_rows, dim)
+        start = stop
+    del reader
+    release_arrow_memory()
     return {int(node_ids[i]): matrix[i] for i in range(len(node_ids))}
 
 
@@ -76,12 +93,15 @@ def drop_zero_norm_vectors(node_vectors: dict[int, np.ndarray]) -> dict[int, np.
 def read_sparse_rows(path: Path) -> tuple[list[int], sp.csr_matrix]:
     """Every row of a sparse file, keeping a half-verse carrying no nonzeros as the value it is."""
     table = pq.read_table(path, columns=["node_id", "indices", "values"])
-    return sparse_rows_to_csr(
+    rows = sparse_rows_to_csr(
         table["node_id"].to_pylist(),
         table["indices"].to_pylist(),
         table["values"].to_pylist(),
         int(table.schema.metadata[b"dim"]),
     )
+    del table
+    release_arrow_memory()
+    return rows
 
 
 def load_sparse_embeddings(path: Path) -> tuple[list[int], sp.csr_matrix]:

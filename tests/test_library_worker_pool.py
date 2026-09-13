@@ -71,3 +71,17 @@ def test_default_worker_count_does_not_oversubscribe_the_machine() -> None:
     """Scoring is compute-bound, so one worker per core is the most the machine can run."""
     #: Safe only because the pool pins each worker's BLAS to a single thread before spawning.
     assert 1 <= default_max_workers() <= (os.cpu_count() or 1)
+
+
+def test_workers_start_fresh_rather_than_forking_the_parent() -> None:
+    """A forked worker inherits the loaded corpus and copies it page by page, so spawn is used."""
+    from library.worker_pool import WORKER_CONTEXT
+
+    assert WORKER_CONTEXT.get_start_method() == "spawn"
+
+
+def test_a_worker_scores_one_item_then_exits() -> None:
+    """A long-lived worker keeps every scored file resident, so each item gets a fresh process."""
+    pids = {pid for _, pid in map_in_order(_pid, [1, 2, 3, 4], max_workers=2)}
+    assert len(pids) == 4
+    assert os.getpid() not in pids

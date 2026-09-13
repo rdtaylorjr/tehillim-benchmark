@@ -27,6 +27,8 @@ def bhsa_clone_location(env: Mapping[str, str] | None = None) -> Path:
 
 
 _MOD_CACHE_ROOT = Path.home() / "text-fabric-data" / "github"
+#: The node features the benchmark reads; the section edges and node types load with any feature.
+LOADED_FEATURES = "book chapter verse"
 
 
 def _call_with_timeout(
@@ -71,12 +73,12 @@ def _load_from_local_clone(
     mod_cache_location_fn: Callable[[str], Path],
     clone_location: Path,
 ) -> Any:
-    """Loads BHSA from its full local clone, plus an optional companion module's local cache."""
+    """Loads the benchmark's features from the local clone, plus a companion module's cache."""
     locations = [str(clone_location)]
     if mod is not None:
         locations.append(str(mod_cache_location_fn(mod)))
     tf = fabric_class(locations=locations, silent="deep")
-    return _as_api(tf.loadAll(silent="deep"))
+    return _as_api(tf.load(LOADED_FEATURES, silent="deep"))
 
 
 def load_bhsa_api(
