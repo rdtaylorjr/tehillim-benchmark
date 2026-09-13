@@ -1,16 +1,12 @@
 """Scores a tehillim-embeddings Parquet vector file against the parallelism benchmark."""
 
-import argparse
-import json
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import numpy as np
 import scipy.sparse as sp
 
-from library.cli import add_scoring_arguments
 from library.embeddings import is_sparse_embeddings, load_embeddings, load_sparse_embeddings
 from library.errors import BenchmarkDataError, InsufficientDataError
 from library.protocol import DEFAULT_N_PERMUTATIONS
@@ -27,11 +23,9 @@ from library.retrieval_metrics import (
 )
 from parallelism.pairs import (
     RetrievalPair,
-    build_retrieval_pairs,
     filter_pairs_with_vectors,
 )
 from parallelism.separation import SeparationResult, similarity_separation
-from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups
 
 _MISSING_NODES_SHOWN = 10
 
@@ -243,29 +237,3 @@ def score_embedding_file(
     node_vectors = load_embeddings(path)
     usable = filter_pairs_with_vectors(pairs, node_vectors)
     return usable, run_evaluation(usable, node_vectors, n_permutations=n_permutations, rng=rng)
-
-
-def main(
-    argv: list[str] | None = None,
-    *,
-    api_factory: Callable[[str], Any] = load_api,
-) -> None:
-    """Parses the arguments this module documents, runs the batch, and writes its output."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("embedding_file", type=Path, help="a tehillim-embeddings Parquet file")
-    add_scoring_arguments(parser, with_permutations=True, with_seed=True)
-    args = parser.parse_args(argv)
-
-    api = api_factory(args.checkout)
-    node_values = read_node_feature_values(api)
-    groups = reconstruct_groups(node_values)
-    pairs = build_retrieval_pairs(groups)
-    rng = np.random.default_rng(args.seed)
-    _, report = score_embedding_file(
-        args.embedding_file, pairs, n_permutations=args.n_permutations, rng=rng
-    )
-    print(json.dumps(asdict(report), indent=2))
-
-
-if __name__ == "__main__":
-    main()

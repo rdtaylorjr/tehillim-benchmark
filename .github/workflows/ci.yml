@@ -11,9 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: rdtaylorjr/tehillim-embeddings
+          path: tehillim-embeddings
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - run: pip install -e ./tehillim-embeddings
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
@@ -26,9 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: rdtaylorjr/tehillim-embeddings
+          path: tehillim-embeddings
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - run: pip install -e ./tehillim-embeddings
       - run: pip install -e "."
       - run: pip install pip-audit
       - run: pip-audit

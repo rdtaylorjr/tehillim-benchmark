@@ -10,9 +10,9 @@ from library.incremental_cache import load_cached_parquet_set
 
 class TestLoadCachedDetail:
     def test_returns_empty_when_no_prior_output_exists(self, tmp_path: Path) -> None:
-        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
+        frames, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
-        assert rows_by_file == [[], []]
+        assert all(frame.empty for frame in frames)
         assert models == set()
 
     def test_reads_rows_and_the_model_set_shared_by_both_files(self, tmp_path: Path) -> None:
@@ -23,16 +23,17 @@ class TestLoadCachedDetail:
             tmp_path / "genre_summary.parquet"
         )
 
-        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
+        frames, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
         assert models == {"a", "b"}
-        assert len(rows_by_file) == 2
-        assert rows_by_file[0] == [{"model": "a", "x": 1}, {"model": "b", "x": 2}]
+        assert len(frames) == 2
+        assert list(frames[0]["model"]) == ["a", "b"]
+        assert list(frames[0]["x"]) == [1, 2]
 
     def test_returns_empty_when_only_some_output_files_exist(self, tmp_path: Path) -> None:
         pd.DataFrame({"model": ["a"], "x": [1]}).to_parquet(tmp_path / "genre_pair_detail.parquet")
 
-        rows_by_file, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
+        frames, models = load_cached_parquet_set(tmp_path, _OUTPUT_FILES)
 
-        assert rows_by_file == [[], []]
+        assert all(frame.empty for frame in frames)
         assert models == set()

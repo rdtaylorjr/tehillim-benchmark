@@ -148,17 +148,14 @@ def test_export_detail_score_model_agrees_between_layouts(both_files) -> None:
             assert all(_close(sr[k], dr[k]) for k in dr if isinstance(dr[k], float))
 
 
-def test_compute_profiles_score_model_agrees_between_layouts(both_files, tmp_path) -> None:
+def test_compute_profiles_score_model_agrees_between_layouts(both_files) -> None:
     from trajectory.scripts.compute_profiles import score_model
 
     dense, sparse = both_files
     by_psalm = {1: list(range(1, 13)), 2: list(range(13, 25))}
-    dense_dir, sparse_dir = tmp_path / "d", tmp_path / "s"
-    dense_dir.mkdir()
-    sparse_dir.mkdir()
 
-    d_count, d_rows = score_model(dense, by_psalm, dense_dir)
-    s_count, s_rows = score_model(sparse, by_psalm, sparse_dir)
+    d_count, d_rows = score_model(dense, by_psalm)
+    s_count, s_rows = score_model(sparse, by_psalm)
 
     assert d_count == s_count
     for dr, sr in zip(d_rows, s_rows, strict=True):

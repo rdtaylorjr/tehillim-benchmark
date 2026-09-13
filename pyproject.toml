@@ -1,6 +1,6 @@
 [project]
 name = "tehillim-benchmark"
-version = "0.6.0"
+version = "0.7.0"
 description = "Evaluates embedding models against Psalms parallelism and genre benchmarks."
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -12,11 +12,13 @@ dependencies = [
     "pyarrow>=17.0",
     "scikit-learn>=1.4",
     "numba>=0.60",
+    "embeddings>=0.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "snakemake>=9.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",
@@ -27,9 +29,12 @@ dev = [
 [tool.deptry]
 known_first_party = ["genre", "library", "parallelism", "trajectory", "ui_export", "tools"]
 
+[tool.deptry.package_module_name_map]
+embeddings = ["core", "families", "lexical", "morphological", "syntactic", "semantic"]
+
 [tool.deptry.per_rule_ignores]
 # Tools CI invokes, so none of them is ever imported by this package.
-DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture"]
+DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture", "snakemake"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -42,6 +47,8 @@ include = ["genre*", "library*", "parallelism*", "trajectory*", "ui_export*", "t
 
 [tool.ruff]
 line-length = 100
+# CI checks the embeddings package out beside this tree so pip can install it before this package.
+extend-exclude = ["tehillim-embeddings"]
 target-version = "py312"
 
 [tool.ruff.lint]

@@ -40,26 +40,27 @@ class TestLoadCachedRows:
 
 class TestLoadCachedParquetSet:
     def test_returns_empty_when_no_prior_output_exists(self, tmp_path: Path) -> None:
-        rows_by_file, models = load_cached_parquet_set(tmp_path, ("a.parquet", "b.parquet"))
+        frames, models = load_cached_parquet_set(tmp_path, ("a.parquet", "b.parquet"))
 
-        assert rows_by_file == [[], []]
+        assert all(frame.empty for frame in frames)
         assert models == set()
 
     def test_reads_rows_and_the_model_set_shared_by_every_file(self, tmp_path: Path) -> None:
         pd.DataFrame({"model": ["a", "b"], "x": [1, 2]}).to_parquet(tmp_path / "one.parquet")
         pd.DataFrame({"model": ["a", "b"], "y": [3, 4]}).to_parquet(tmp_path / "two.parquet")
 
-        rows_by_file, models = load_cached_parquet_set(tmp_path, ("one.parquet", "two.parquet"))
+        frames, models = load_cached_parquet_set(tmp_path, ("one.parquet", "two.parquet"))
 
         assert models == {"a", "b"}
-        assert rows_by_file[0] == [{"model": "a", "x": 1}, {"model": "b", "x": 2}]
+        assert list(frames[0]["model"]) == ["a", "b"]
+        assert list(frames[0]["x"]) == [1, 2]
 
     def test_returns_empty_when_only_some_files_exist(self, tmp_path: Path) -> None:
         pd.DataFrame({"model": ["a"], "x": [1]}).to_parquet(tmp_path / "one.parquet")
 
-        rows_by_file, models = load_cached_parquet_set(tmp_path, ("one.parquet", "two.parquet"))
+        frames, models = load_cached_parquet_set(tmp_path, ("one.parquet", "two.parquet"))
 
-        assert rows_by_file == [[], []]
+        assert all(frame.empty for frame in frames)
         assert models == set()
 
 
@@ -78,6 +79,6 @@ def test_cached_parquet_floats_round_trip_exactly(tmp_path: Path) -> None:
     value = 4.1377175583932606e-42
     pd.DataFrame({"model": ["m"], "p": [value]}).to_parquet(tmp_path / "a.parquet")
 
-    (rows,), _models = load_cached_parquet_set(tmp_path, ("a.parquet",))
+    (frame,), _models = load_cached_parquet_set(tmp_path, ("a.parquet",))
 
-    assert rows[0]["p"] == value
+    assert frame["p"].iloc[0] == value

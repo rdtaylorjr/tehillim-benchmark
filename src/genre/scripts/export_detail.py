@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 from genre.calibrated import compare_genre_calibrated, genre_calibrated_row
 from genre.evaluate import pair_similarities
@@ -22,6 +21,7 @@ from library.cli import (
     report_reuse,
 )
 from library.embeddings import dataset_identifier
+from library.frame_accumulator import FrameAccumulator
 from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
 from library.psalm_vectors import load_psalm_vectors
@@ -99,14 +99,14 @@ def main(
     pairs = build_genre_pairs(genre_by_psalm)
     half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
 
-    (cached_pair_rows, cached_summary_rows), cached_models = load_cached_parquet_set(
+    (cached_pairs, cached_summaries), cached_models = load_cached_parquet_set(
         args.output_dir, _OUTPUT_FILES
     )
     report_reuse(cached_models, args.output_dir)
 
     model_paths = uncached_model_paths(args.embeddings_dir, cached_models)
-    pair_rows: list[dict[str, Any]] = list(cached_pair_rows)
-    summary_rows: list[dict[str, Any]] = list(cached_summary_rows)
+    pair_rows = FrameAccumulator(cached_pairs)
+    summary_rows = FrameAccumulator(cached_summaries)
     score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs)
     for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
         if scored is None:
@@ -115,8 +115,8 @@ def main(
         pair_rows.extend(model_pair_rows)
         summary_rows.extend(model_summary_rows)
 
-    write_dataframe_parquet(args.output_dir / "genre_pair_detail.parquet", pd.DataFrame(pair_rows))
-    write_dataframe_parquet(args.output_dir / "genre_summary.parquet", pd.DataFrame(summary_rows))
+    write_dataframe_parquet(args.output_dir / "genre_pair_detail.parquet", pair_rows.frame())
+    write_dataframe_parquet(args.output_dir / "genre_summary.parquet", summary_rows.frame())
     print(f"wrote {len(pair_rows)} pair rows, {len(summary_rows)} summary rows")
 
 

@@ -31,6 +31,19 @@ def add_embeddings_dir_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("embeddings_dir", type=Path)
 
 
+def add_shuffle_family_arguments(parser: argparse.ArgumentParser) -> None:
+    """The construction a shuffle control draws from, and the tables its vocabulary needs."""
+    from families.shuffle import FAMILIES
+
+    parser.add_argument("--family", required=True, choices=sorted(FAMILIES), metavar="KEY")
+    parser.add_argument("--config-root", type=Path, required=True)
+
+
+def add_workers_argument(parser: argparse.ArgumentParser) -> None:
+    """The worker-process count, defaulting to the machine's cores."""
+    parser.add_argument("--workers", type=int, default=default_max_workers())
+
+
 def add_scoring_arguments(
     parser: argparse.ArgumentParser,
     *,
@@ -42,7 +55,7 @@ def add_scoring_arguments(
 ) -> None:
     """Adds the options every batch script takes, so a changed default lands in one place."""
     parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
-    parser.add_argument("--workers", type=int, default=default_max_workers())
+    add_workers_argument(parser)
     parser.add_argument("--output", type=Path, default=None)
     if with_seed:
         parser.add_argument("--seed", type=int, default=0)

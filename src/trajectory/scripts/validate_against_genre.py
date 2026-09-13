@@ -23,7 +23,7 @@ from trajectory.genre_breakdown import joint_genre_breakdown_permutation_test
 from trajectory.residualize import residualize_by_length, residualize_on_covariates
 from trajectory.validation import permutation_test, same_genre_matrix
 
-_METRICS = (
+METRICS = (
     "content_distance",
     "structural_distance",
     "adjacent_similarity_distance",
@@ -236,7 +236,7 @@ def validate_one_model(
 
     rows: list[dict[str, Any]] = []
     breakdown_rows: list[dict[str, str | int | float]] = []
-    for metric in _METRICS:
+    for metric in METRICS:
         rows.append(
             build_validation_row(
                 model,

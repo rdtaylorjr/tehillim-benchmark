@@ -111,8 +111,8 @@ def build_one_model(
     output_dir: Path,
     genres: list[str],
     inputs: ModelDetailInputs,
-) -> int:
-    """Writes whichever sections have real data for one model, returning how many files it wrote."""
+) -> list[Path]:
+    """Writes whichever sections have real data for one model, returning the files it wrote."""
     payload: dict[str, Any] = {"model": model, "domain": domain}
     if (
         inputs.pair_detail is not None
@@ -133,8 +133,8 @@ def build_one_model(
             inputs.trajectory, inputs.trajectory_metric, genres, inputs.gap_stats
         )
     if len(payload) <= _EMPTY_PAYLOAD_KEYS:
-        return 0
-    return len(split_sections(payload, output_dir))
+        return []
+    return split_sections(payload, output_dir)
 
 
 class _DomainSources(NamedTuple):
@@ -189,7 +189,7 @@ def _load_domain_sources(
             genre_by_psalm,
         ),
         trajectory=_grouped_by_model(
-            _dataset(data_dir, "trajectory", domain, "profiles", "trajectory_distances.parquet"),
+            _dataset(data_dir, "trajectory", domain, "raw", "trajectory_distances.parquet"),
             genre_by_psalm,
         ),
         parallelism_ci=pd.read_csv(parallelism_ci) if parallelism_ci.exists() else None,
@@ -241,9 +241,20 @@ class _ModelTask(NamedTuple):
     inputs: ModelDetailInputs
 
 
-def _write_task(task: _ModelTask) -> int:
-    """Writes one model's detail files, returning how many were written."""
+def _write_task(task: _ModelTask) -> list[Path]:
+    """Writes one model's detail files, returning their paths."""
     return build_one_model(task.model, task.domain, task.output_dir, task.genres, task.inputs)
+
+
+def index_path(output_dir: Path, domain: str) -> Path:
+    """The per-domain listing of detail files, which is the one output a driver declares."""
+    return output_dir / f"detail_{domain}_index.json"
+
+
+def clear_domain(output_dir: Path, domain: str) -> None:
+    """Removes a domain's earlier detail files so a rebuild never leaves a retired model behind."""
+    for path in output_dir.glob(f"detail_{domain}_*.json"):
+        path.unlink()
 
 
 def _task_model(task: _ModelTask) -> str:
@@ -260,7 +271,9 @@ def build_domain(
     output_dir: Path,
     max_workers: int,
 ) -> int:
-    """Builds every model's detail JSON for one domain; returns the count of files written."""
+    """Rebuilds one domain's detail JSON from a clean slate and writes its index of files."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    clear_domain(output_dir, domain)
     sources = _load_domain_sources(domain, data_dir, domain_json, genre_by_psalm)
     #: Each task is assembled here, so a worker carries one model's slice and not every frame.
     tasks = [
@@ -274,7 +287,9 @@ def build_domain(
         for model in sorted(set().union(*sources.table_models.values()))
     ]
     written = map_in_order(skipping_unscorable(_write_task, label=_task_model), tasks, max_workers)
-    return sum(count for count in written if count is not None)
+    files = sorted(path.name for paths in written if paths is not None for path in paths)
+    write_json(index_path(output_dir, domain), files)
+    return len(files)
 
 
 def main(

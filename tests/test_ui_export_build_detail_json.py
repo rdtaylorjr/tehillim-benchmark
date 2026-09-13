@@ -327,7 +327,7 @@ def _write_domain_tree(root: Path, domain: str) -> None:
     """A minimal tehillim-data tree: two models in the parallelism tables, one also in genre."""
     par = root / f"analysis=benchmark/benchmark=parallelism/domain={domain}/stage=detail"
     gen = root / f"analysis=benchmark/benchmark=genre/domain={domain}/stage=detail"
-    traj = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=profiles"
+    traj = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=raw"
     raw = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=raw"
     for d in (par, gen, traj, raw):
         d.mkdir(parents=True, exist_ok=True)
@@ -408,13 +408,38 @@ class TestBuildDomain:
         )
 
         names = sorted(p.name for p in output_dir.glob("*.json"))
-        assert names == [
+        expected = [
             "detail_syntactic_a_genre.json",
             "detail_syntactic_a_parallelism.json",
             "detail_syntactic_a_trajectory.json",
             "detail_syntactic_b_parallelism.json",
         ]
-        assert written == len(names)
+        assert names == [*expected, "detail_syntactic_index.json"]
+        assert written == len(expected)
+        assert json.loads((output_dir / "detail_syntactic_index.json").read_text()) == expected
+
+    def test_a_rebuild_removes_files_of_a_model_no_longer_present(self, tmp_path: Path) -> None:
+        """A retired model's detail files would otherwise outlive it in the served directory."""
+        data_dir, output_dir = tmp_path / "data", tmp_path / "out"
+        _write_domain_tree(data_dir, "syntactic")
+        output_dir.mkdir()
+        stale = output_dir / "detail_syntactic_retired_genre.json"
+        stale.write_text("{}")
+        other_domain = output_dir / "detail_lexical_kept_genre.json"
+        other_domain.write_text("{}")
+
+        build_domain(
+            "syntactic",
+            data_dir,
+            _domain_payload(),
+            {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            {1: 10, 2: 12, 3: 8, 4: 9},
+            output_dir,
+            max_workers=1,
+        )
+
+        assert not stale.exists()
+        assert other_domain.exists()
 
     def test_a_model_absent_from_a_table_gets_no_section_for_it(self, tmp_path: Path) -> None:
         """Model b is only in the parallelism table, so it must never gain a genre file."""

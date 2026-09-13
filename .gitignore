@@ -23,5 +23,13 @@ coverage.json
 htmlcov/
 
 # Repo-specific
+RERUN.md
 results/
 corpus-cache/
+
+*.md
+!README.md
+
+# Driver state
+.snakemake/
+logs/

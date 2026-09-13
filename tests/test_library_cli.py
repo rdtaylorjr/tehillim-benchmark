@@ -143,3 +143,13 @@ def test_the_embeddings_directory_positional_is_defined_once() -> None:
     add_scoring_arguments(parser)
 
     assert parser.parse_args(["data/domain=lexical"]).embeddings_dir == Path("data/domain=lexical")
+
+
+def test_the_workers_option_has_one_definition_shared_with_the_driver() -> None:
+    """The driver's runner takes the same worker option the scoring scripts take."""
+    from library.cli import add_workers_argument
+
+    parser = argparse.ArgumentParser()
+    add_workers_argument(parser)
+    assert parser.parse_args([]).workers == default_max_workers()
+    assert parser.parse_args(["--workers", "3"]).workers == 3
