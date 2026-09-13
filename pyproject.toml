@@ -12,7 +12,7 @@ dependencies = [
     "pyarrow>=17.0",
     "scikit-learn>=1.4",
     "numba>=0.60",
-    "embeddings>=0.7",
+    "embeddings>=0.9",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +47,8 @@ include = ["genre*", "library*", "parallelism*", "trajectory*", "ui_export*", "t
 
 [tool.ruff]
 line-length = 100
+# CI checks the embeddings package out beside this tree so pip can install it before this package.
+extend-exclude = ["tehillim-embeddings"]
 target-version = "py312"
 
 [tool.ruff.lint]
