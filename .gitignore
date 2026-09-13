@@ -29,3 +29,7 @@ corpus-cache/
 
 *.md
 !README.md
+
+# Driver state
+.snakemake/
+logs/

@@ -34,8 +34,8 @@ def test_build_retrieval_pairs_pairs_a_simple_couplet() -> None:
     assert pairs[0].target_indicator == "B"
 
 
-def test_build_retrieval_pairs_does_not_cross_repeated_couplet_boundaries() -> None:
-    """AB-AB-AB is three independent couplets; B1 must never pair with A2."""
+def test_build_retrieval_pairs_pairs_every_same_letter_member_across_lines() -> None:
+    """AB-AB-AB: each A pairs with every other A and each B with every other B, never A with B."""
     groups = [
         _group(
             "AB-AB-AB",
@@ -47,11 +47,13 @@ def test_build_retrieval_pairs_does_not_cross_repeated_couplet_boundaries() -> N
 
     pairs = build_retrieval_pairs(groups)
 
-    assert len(pairs) == 3
     assert [(p.source_nodes, p.target_nodes) for p in pairs] == [
-        ((1,), (2,)),
-        ((3,), (4,)),
-        ((5,), (6,)),
+        ((1,), (3,)),
+        ((1,), (5,)),
+        ((2,), (4,)),
+        ((2,), (6,)),
+        ((3,), (5,)),
+        ((4,), (6,)),
     ]
 
 
@@ -64,14 +66,13 @@ def test_build_retrieval_pairs_uses_overlapping_adjacent_pairs_within_one_stroph
     assert [(p.source_nodes, p.target_nodes) for p in pairs] == [((1,), (2,)), ((2,), (3,))]
 
 
-def test_build_retrieval_pairs_drops_a_lone_single_member_segment() -> None:
-    """A-AB: the lone 'A' segment has no partner within itself and contributes no pair."""
+def test_build_retrieval_pairs_pairs_a_lone_member_with_its_letter_partner() -> None:
+    """A-AB: the lone A pairs with the A of the next line, and B has no partner."""
     groups = [_group("A-AB", (0, 1, 2), ("A", "A", "B"), ((1,), (2,), (3,)))]
 
     pairs = build_retrieval_pairs(groups)
 
-    assert len(pairs) == 1
-    assert (pairs[0].source_nodes, pairs[0].target_nodes) == ((2,), (3,))
+    assert [(p.source_nodes, p.target_nodes) for p in pairs] == [((1,), (2,))]
 
 
 def test_build_retrieval_pairs_drops_a_pair_with_a_slot_missing_from_the_reconstructed_group() -> (
@@ -166,8 +167,8 @@ def test_build_retrieval_pairs_matches_by_letter_identity_in_a_rotated_chiasm() 
     }
 
 
-def test_build_retrieval_pairs_does_not_treat_identical_repeats_as_a_chiasm() -> None:
-    """AB-AB (identical order) stays two independent couplets, not a chiastic link."""
+def test_build_retrieval_pairs_pairs_same_order_letters_across_lines() -> None:
+    """AB-AB: A pairs with the second line's A and B with its B, same as a chiasm by letter."""
     groups = [
         _group(
             "AB-AB",
@@ -179,7 +180,7 @@ def test_build_retrieval_pairs_does_not_treat_identical_repeats_as_a_chiasm() ->
 
     pairs = build_retrieval_pairs(groups)
 
-    assert {(p.source_nodes, p.target_nodes) for p in pairs} == {((1,), (2,)), ((3,), (4,))}
+    assert {(p.source_nodes, p.target_nodes) for p in pairs} == {((1,), (3,)), ((2,), (4,))}
 
 
 def test_build_retrieval_pairs_assigns_stable_unique_pair_ids() -> None:

@@ -1,4 +1,4 @@
-"""Computes each psalm's content centroid and half-verses sequence, all models."""
+"""Computes psalm trajectory profiles in memory and writes the pairwise distances, all models."""
 
 import argparse
 from collections.abc import Callable
@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
 from library.centroid import psalm_centroids, sparse_psalm_centroids
-from library.cli import add_embeddings_dir_argument, add_scoring_arguments, report_reuse
+from library.cli import add_embeddings_dir_argument, add_scoring_arguments
 from library.embeddings import (
     dataset_identifier,
     is_sparse_embeddings,
@@ -20,7 +19,6 @@ from library.embeddings import (
     load_sparse_embeddings,
 )
 from library.frame_accumulator import FrameAccumulator
-from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
 from library.rows_output import write_dataframe_parquet
 from library.scoring import skipping_unscorable
@@ -53,24 +51,6 @@ def compute_psalm_profiles(
     return profiles
 
 
-def profile_rows(model: str, profiles: dict[int, dict[str, np.ndarray]]) -> list[dict[str, Any]]:
-    """Flattens each psalm's profile into one row: the real, un-resampled half-verses sequence."""
-    rows = []
-    for psalm, profile in profiles.items():
-        sequence = profile["sequence"]
-        rows.append(
-            {
-                "model": model,
-                "psalm": psalm,
-                "centroid": profile["centroid"].astype(np.float32),
-                "sequence": sequence.flatten().astype(np.float32),
-                "n_half_verses": sequence.shape[0],
-                "dim": sequence.shape[1],
-            }
-        )
-    return rows
-
-
 def distance_rows(model: str, profiles: dict[int, dict[str, np.ndarray]]) -> list[dict[str, Any]]:
     """One row per unordered psalm pair: content, structural, and geometry-curve DTW distances."""
     self_similarity = {p: self_similarity_matrix(v["sequence"]) for p, v in profiles.items()}
@@ -100,15 +80,10 @@ def distance_rows(model: str, profiles: dict[int, dict[str, np.ndarray]]) -> lis
     return rows
 
 
-def profile_shard_path(output_dir: Path, model: str) -> Path:
-    """One parquet file per model, so no single shard risks GitHub's 100MB per-file limit."""
-    return output_dir / f"{model}.parquet"
-
-
 def score_model(
-    path: Path, half_verses_by_psalm: dict[int, list[int]], output_dir: Path
+    path: Path, half_verses_by_psalm: dict[int, list[int]]
 ) -> tuple[int, list[dict[str, Any]]]:
-    """Writes one model file's profile shard and returns its row count plus its distance rows."""
+    """Builds one model's psalm profiles in memory and returns their count and distance rows."""
     model = dataset_identifier(path)
     if is_sparse_embeddings(path):
         node_ids, matrix = load_sparse_embeddings(path)
@@ -123,14 +98,7 @@ def score_model(
         sequences_by_psalm = psalm_half_verse_sequences(half_verses_by_psalm, node_vectors)
         centroids_by_psalm = psalm_centroids(half_verses_by_psalm, node_vectors)
     profiles = compute_psalm_profiles(sequences_by_psalm, centroids_by_psalm)
-    rows = profile_rows(model, profiles)
-    write_dataframe_parquet(
-        profile_shard_path(output_dir, model),
-        pd.DataFrame(rows),
-        compression="zstd",
-        compression_level=19,
-    )
-    return len(rows), distance_rows(model, profiles)
+    return len(profiles), distance_rows(model, profiles)
 
 
 def main(
@@ -141,43 +109,28 @@ def main(
     """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
     add_embeddings_dir_argument(parser)
-    parser.add_argument("--output-dir", type=Path, required=True)
     add_scoring_arguments(parser)
     args = parser.parse_args(argv)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.output is None:
+        parser.error("--output is required")
 
     api = api_factory(args.checkout)
     half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
-
-    (cached_distances,), cached_models = load_cached_parquet_set(
-        args.output_dir, ("trajectory_distances.parquet",)
-    )
-    report_reuse(cached_models, args.output_dir)
-
-    # A cached model still needs rescoring when its own profile shard is missing.
-    complete = {
-        model for model in cached_models if profile_shard_path(args.output_dir, model).exists()
-    }
-    model_paths = uncached_model_paths(args.embeddings_dir, complete)
-    distances = FrameAccumulator(cached_distances)
-    n_profile_rows = 0
-    score = partial(
-        score_model, half_verses_by_psalm=half_verses_by_psalm, output_dir=args.output_dir
-    )
+    model_paths = uncached_model_paths(args.embeddings_dir, set())
+    distances = FrameAccumulator()
+    n_profiles = 0
+    score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm)
     for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
         if scored is None:
             continue
-        model_n_rows, model_distance_rows = scored
-        n_profile_rows += model_n_rows
+        model_n_profiles, model_distance_rows = scored
+        n_profiles += model_n_profiles
         distances.extend(model_distance_rows)
 
     write_dataframe_parquet(
-        args.output_dir / "trajectory_distances.parquet",
-        distances.frame(),
-        compression="zstd",
-        compression_level=19,
+        args.output, distances.frame(), compression="zstd", compression_level=19
     )
-    print(f"wrote {n_profile_rows} profile rows, {len(distances)} distance rows")
+    print(f"profiled {n_profiles} psalm sequences, wrote {len(distances)} distance rows")
 
 
 if __name__ == "__main__":

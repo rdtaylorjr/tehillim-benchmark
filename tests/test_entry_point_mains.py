@@ -32,8 +32,6 @@ from parallelism.scripts import shuffle_order_control as parallelism_shuffle_ord
 from trajectory.scripts import compute_profiles as trajectory_compute_profiles
 from trajectory.scripts import export_ui_rows as trajectory_export_ui_rows
 from trajectory.scripts import validate_against_genre as trajectory_validate_against_genre
-from ui_export import export as ui_export
-from ui_export.scripts import build_ui_page
 
 N_SHUFFLE_DRAWS = 40
 
@@ -315,30 +313,23 @@ class TestParallelismExportDetail:
 
 
 class TestTrajectoryComputeProfiles:
-    def test_writes_the_distances_parquet_and_a_shard_per_model(
+    def test_writes_only_the_distances_parquet(
         self, embeddings_dir: Path, tmp_path: Path, bhsa_api_over
     ) -> None:
-        output_dir = tmp_path / "trajectory"
+        """Profiles are built in memory, so the one output is the pairwise distance table."""
+        output = tmp_path / "trajectory" / "trajectory_distances.parquet"
 
         trajectory_compute_profiles.main(
-            [str(embeddings_dir), "--output-dir", str(output_dir), "--workers", "1"],
+            [str(embeddings_dir), "--output", str(output), "--workers", "1"],
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
-        assert (output_dir / "trajectory_distances.parquet").exists()
+        assert list(output.parent.iterdir()) == [output]
 
-    def test_a_second_run_reuses_the_shards_the_first_wrote(
-        self, embeddings_dir: Path, tmp_path: Path, bhsa_api_over
-    ) -> None:
-        output_dir = tmp_path / "trajectory"
-        argv = [str(embeddings_dir), "--output-dir", str(output_dir), "--workers", "1"]
-        api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
-
-        trajectory_compute_profiles.main(argv, api_factory=api)
-        first = (output_dir / "trajectory_distances.parquet").read_bytes()
-        trajectory_compute_profiles.main(argv, api_factory=api)
-
-        assert (output_dir / "trajectory_distances.parquet").read_bytes() == first
+    def test_requires_an_output_path(self, embeddings_dir: Path) -> None:
+        """A distances table with nowhere to go is a usage error."""
+        with pytest.raises(SystemExit):
+            trajectory_compute_profiles.main([str(embeddings_dir), "--workers", "1"])
 
 
 class TestGenreBuildMasterReport:
@@ -557,7 +548,13 @@ class TestTrajectoryValidateAgainstGenre:
         api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
         profiles_dir = tmp_path / "trajectory"
         trajectory_compute_profiles.main(
-            [str(embeddings_dir), "--output-dir", str(profiles_dir), "--workers", "1"],
+            [
+                str(embeddings_dir),
+                "--output",
+                str(profiles_dir / "trajectory_distances.parquet"),
+                "--workers",
+                "1",
+            ],
             api_factory=api,
         )
         output = tmp_path / "validation.csv"
@@ -591,7 +588,13 @@ class TestTrajectoryExportUiRows:
         api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
         profiles_dir = tmp_path / "trajectory"
         trajectory_compute_profiles.main(
-            [str(embeddings_dir), "--output-dir", str(profiles_dir), "--workers", "1"],
+            [
+                str(embeddings_dir),
+                "--output",
+                str(profiles_dir / "trajectory_distances.parquet"),
+                "--workers",
+                "1",
+            ],
             api_factory=api,
         )
         validation = tmp_path / "validation.csv"
@@ -630,233 +633,3 @@ class TestTrajectoryExportUiRows:
 
         assert json.loads(output.read_text())
         assert json.loads(breakdown_output.read_text())
-
-
-class TestUiExportPipeline:
-    """Runs the whole chain a domain's site payload is built from, in a release's order."""
-
-    def _domain_json(
-        self,
-        genre_csv: Path,
-        embeddings_dir: Path,
-        shuffled_embeddings_dir: Path,
-        tmp_path: Path,
-        bhsa_api_over,
-        parallel_bhsa_api_over,
-    ) -> Path:
-        genre_api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
-        parallel_api = lambda _checkout: parallel_bhsa_api_over(  # noqa: E731
-            HALF_VERSES, PARALLEL_ANNOTATIONS
-        )
-
-        parallelism_dir = tmp_path / "parallelism"
-        retrieval = parallelism_dir / "stage=raw" / "retrieval.csv"
-        calibration = parallelism_dir / "stage=raw" / "calibration.csv"
-        detail_dir = parallelism_dir / "stage=detail"
-        retrieval.parent.mkdir(parents=True)
-        parallelism_compare_models.main(
-            [str(embeddings_dir), "--output", str(retrieval), "--workers", "1"],
-            api_factory=parallel_api,
-        )
-        parallelism_compare_true_similarity.main(
-            [str(embeddings_dir), "--output", str(calibration), "--workers", "1"],
-            api_factory=parallel_api,
-        )
-        parallelism_export_detail.main(
-            [str(embeddings_dir), "--output-dir", str(detail_dir), "--workers", "1"],
-            api_factory=parallel_api,
-        )
-        parallelism_build_master_report.main(
-            [
-                "--retrieval-csv",
-                str(retrieval),
-                "--calibration-csv",
-                str(calibration),
-                "--detail-dir",
-                str(detail_dir),
-                "--output-dir",
-                str(parallelism_dir / "stage=master"),
-            ]
-        )
-
-        genre_dir = tmp_path / "genre"
-        summary = genre_dir / "stage=raw" / "summary.csv"
-        bootstrap = genre_dir / "stage=raw" / "bootstrap.csv"
-        by_genre = genre_dir / "stage=raw" / "by_genre.csv"
-        summary.parent.mkdir(parents=True)
-        compare_calibrated.main(
-            [str(genre_csv), str(embeddings_dir), "--output", str(summary), "--workers", "1"],
-            api_factory=genre_api,
-        )
-        genre_compute_bootstrap_cis.main(
-            [
-                str(genre_csv),
-                str(embeddings_dir),
-                "--output",
-                str(bootstrap),
-                "--workers",
-                "1",
-                "--n-resamples",
-                "20",
-                "--seed",
-                "0",
-            ],
-            api_factory=genre_api,
-        )
-        genre_compare_by_genre.main(
-            [
-                str(genre_csv),
-                str(embeddings_dir),
-                "--output",
-                str(by_genre),
-                "--workers",
-                "1",
-                "--n-resamples",
-                "20",
-                "--n-permutations",
-                "20",
-                "--seed",
-                "0",
-            ],
-            api_factory=genre_api,
-        )
-        genre_detail_dir = genre_dir / "stage=detail"
-        genre_export_detail.main(
-            [
-                str(genre_csv),
-                str(embeddings_dir),
-                "--output-dir",
-                str(genre_detail_dir),
-                "--workers",
-                "1",
-            ],
-            api_factory=genre_api,
-        )
-        genre_build_master_report.main(
-            [
-                "--summary-csv",
-                str(summary),
-                "--bootstrap-csv",
-                str(bootstrap),
-                "--detail-dir",
-                str(genre_detail_dir),
-                "--output-dir",
-                str(genre_dir / "stage=master"),
-            ]
-        )
-
-        profiles_dir = tmp_path / "trajectory"
-        trajectory_compute_profiles.main(
-            [str(embeddings_dir), "--output-dir", str(profiles_dir), "--workers", "1"],
-            api_factory=genre_api,
-        )
-        validation = profiles_dir / "validation.csv"
-        breakdown = profiles_dir / "by_genre.csv"
-        trajectory_validate_against_genre.main(
-            [
-                str(genre_csv),
-                str(profiles_dir / "trajectory_distances.parquet"),
-                "--output",
-                str(validation),
-                "--breakdown-output",
-                str(breakdown),
-                "--workers",
-                "1",
-                "--n-permutations",
-                "50",
-                "--seed",
-                "0",
-            ],
-            api_factory=genre_api,
-        )
-        ui_rows = profiles_dir / "rows.json"
-        by_genre_rows = profiles_dir / "by_genre.json"
-        trajectory_export_ui_rows.main(
-            [
-                str(validation),
-                "--breakdown-csv",
-                str(breakdown),
-                "--output",
-                str(ui_rows),
-                "--breakdown-output",
-                str(by_genre_rows),
-            ]
-        )
-
-        domain_json = tmp_path / "semantic.json"
-        ui_export.main(
-            [
-                "semantic",
-                "--parallelism-dir",
-                str(parallelism_dir),
-                "--genre-dir",
-                str(genre_dir),
-                "--trajectory-ui-rows",
-                str(ui_rows),
-                "--trajectory-by-genre-rows",
-                str(by_genre_rows),
-                "--output",
-                str(domain_json),
-            ]
-        )
-        return domain_json
-
-    def test_writes_a_domain_payload_naming_the_domain_it_was_built_for(
-        self,
-        genre_csv: Path,
-        embeddings_dir: Path,
-        shuffled_embeddings_dir: Path,
-        tmp_path: Path,
-        bhsa_api_over,
-        parallel_bhsa_api_over,
-    ) -> None:
-        domain_json = self._domain_json(
-            genre_csv,
-            embeddings_dir,
-            shuffled_embeddings_dir,
-            tmp_path,
-            bhsa_api_over,
-            parallel_bhsa_api_over,
-        )
-
-        assert set(json.loads(domain_json.read_text())) == {"semantic"}
-
-    def test_build_ui_page_assembles_the_payload_into_the_template(
-        self,
-        genre_csv: Path,
-        embeddings_dir: Path,
-        shuffled_embeddings_dir: Path,
-        tmp_path: Path,
-        bhsa_api_over,
-        parallel_bhsa_api_over,
-    ) -> None:
-        domain_json = self._domain_json(
-            genre_csv,
-            embeddings_dir,
-            shuffled_embeddings_dir,
-            tmp_path,
-            bhsa_api_over,
-            parallel_bhsa_api_over,
-        )
-        template = tmp_path / "template.html"
-        template.write_text(
-            "<html><script>/*UI_DATA_JSON*/{}/*END_UI_DATA_JSON*/</script>"
-            "<script>/*UI_BUNDLE_JS*/</script></html>"
-        )
-        bundle = tmp_path / "bundle.js"
-        bundle.write_text("console.log('ui')")
-        output = tmp_path / "index.html"
-
-        build_ui_page.main(
-            [
-                str(domain_json),
-                "--template",
-                str(template),
-                "--bundle",
-                str(bundle),
-                "--output",
-                str(output),
-            ]
-        )
-
-        assert "semantic" in output.read_text()

@@ -12,29 +12,22 @@ from types import ModuleType
 
 import pytest
 
-ENTRY_POINTS = [
-    "genre.scripts.build_master_report",
-    "genre.scripts.compare_by_genre",
-    "genre.scripts.compare_calibrated",
-    "genre.scripts.compare_models",
-    "genre.scripts.compute_bootstrap_cis",
-    "genre.scripts.export_detail",
-    "genre.scripts.shuffle_order_control",
-    "parallelism.evaluate",
-    "parallelism.scripts.build_master_report",
-    "parallelism.scripts.compare_baseline",
-    "parallelism.scripts.compare_models",
-    "parallelism.scripts.compare_true_similarity",
-    "parallelism.scripts.compute_bootstrap_cis",
-    "parallelism.scripts.export_detail",
-    "parallelism.scripts.shuffle_order_control",
-    "trajectory.scripts.compute_profiles",
-    "trajectory.scripts.export_ui_rows",
-    "trajectory.scripts.validate_against_genre",
-    "ui_export.export",
-    "ui_export.scripts.build_detail_json",
-    "ui_export.scripts.build_ui_page",
-]
+SRC = Path(__file__).resolve().parents[1] / "src"
+
+
+def _entry_point_modules() -> list[str]:
+    """Every shipped module defining a main(), discovered rather than listed."""
+    names = []
+    for path in sorted(SRC.rglob("*.py")):
+        if "egg-info" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        if any(isinstance(n, ast.FunctionDef) and n.name == "main" for n in tree.body):
+            names.append(".".join(path.relative_to(SRC).with_suffix("").parts))
+    return names
+
+
+ENTRY_POINTS = _entry_point_modules()
 
 #: Reading the corpus is the one dependency a test cannot supply as a file, so it is injected.
 CORPUS_READING = {
@@ -44,7 +37,6 @@ CORPUS_READING = {
     "genre.scripts.compute_bootstrap_cis",
     "genre.scripts.export_detail",
     "genre.scripts.shuffle_order_control",
-    "parallelism.evaluate",
     "parallelism.scripts.compare_baseline",
     "parallelism.scripts.compare_models",
     "parallelism.scripts.compare_true_similarity",

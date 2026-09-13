@@ -5,8 +5,6 @@ import numpy as np
 from trajectory.scripts.compute_profiles import (
     compute_psalm_profiles,
     distance_rows,
-    profile_rows,
-    profile_shard_path,
     score_model,
 )
 
@@ -43,32 +41,6 @@ def test_compute_psalm_profiles_skips_a_psalm_missing_its_centroid() -> None:
     profiles = compute_psalm_profiles(sequences, centroids)
 
     assert profiles == {}
-
-
-def test_profile_rows_flattens_one_row_per_psalm_with_its_real_half_verse_count() -> None:
-    sequences, centroids = _sequences_and_centroids()
-    profiles = compute_psalm_profiles(sequences, centroids)
-
-    rows = profile_rows("model_a", profiles)
-
-    assert len(rows) == 1
-    assert rows[0]["model"] == "model_a"
-    assert rows[0]["psalm"] == 1
-    assert rows[0]["n_half_verses"] == 5
-    assert rows[0]["dim"] == 2
-    assert len(rows[0]["sequence"]) == 10
-
-
-def test_profile_rows_stores_centroid_and_sequence_as_float32_to_halve_parquet_size() -> None:
-    """The source embeddings are float32 already; float64 storage would add no precision."""
-    sequences, centroids = _sequences_and_centroids()
-    profiles = compute_psalm_profiles(sequences, centroids)
-
-    rows = profile_rows("model_a", profiles)
-
-    assert rows[0]["centroid"].dtype == np.float32
-    assert rows[0]["sequence"].dtype == np.float32
-    assert np.allclose(rows[0]["sequence"], profiles[1]["sequence"].flatten(), atol=1e-6)
 
 
 def test_distance_rows_has_one_row_per_unordered_psalm_pair() -> None:
@@ -110,16 +82,10 @@ def test_distance_rows_handles_psalms_of_different_lengths_without_resampling() 
     assert np.isfinite(rows[0]["structural_distance"])
 
 
-def test_profile_shard_path_writes_one_file_per_model_directly_under_output_dir() -> None:
-    """One file per model keeps every shard under GitHub's 100MB per-file limit."""
-    path = profile_shard_path(Path("results/trajectory"), "bge_m3_vocalized")
-
-    assert path == Path("results/trajectory/bge_m3_vocalized.parquet")
-
-
-def test_score_model_writes_a_profile_shard_and_returns_its_distance_rows(
+def test_score_model_profiles_in_memory_and_returns_its_distance_rows(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
+    """Nothing is written per model: the profile lives only long enough to yield distances."""
     path = write_embeddings_parquet(
         tmp_path / "domain=d" / "model=mine" / "v.parquet",
         {
@@ -133,13 +99,10 @@ def test_score_model_writes_a_profile_shard_and_returns_its_distance_rows(
             8: [0.5, 0.5],
         },
     )
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
+    n_profiles, rows = score_model(path, {1: [1, 2, 3, 4], 2: [5, 6, 7, 8]})
 
-    n_profile_rows, rows = score_model(path, {1: [1, 2, 3, 4], 2: [5, 6, 7, 8]}, output_dir)
-
-    assert profile_shard_path(output_dir, "mine").exists()
-    assert n_profile_rows == 2
+    assert list(tmp_path.rglob("*.parquet")) == [path]
+    assert n_profiles == 2
     assert [row["model"] for row in rows] == ["mine"]
     assert {row["psalm_a"] for row in rows} == {1}
     assert {row["psalm_b"] for row in rows} == {2}

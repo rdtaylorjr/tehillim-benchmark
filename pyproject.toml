@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "snakemake>=9.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.10",
@@ -33,7 +34,7 @@ embeddings = ["core", "families", "lexical", "morphological", "syntactic", "sema
 
 [tool.deptry.per_rule_ignores]
 # Tools CI invokes, so none of them is ever imported by this package.
-DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture"]
+DEP002 = ["pytest", "pytest-cov", "ruff", "mypy", "deptry", "vulture", "snakemake"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

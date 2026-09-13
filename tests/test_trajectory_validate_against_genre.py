@@ -6,7 +6,7 @@ import pytest
 
 from library.multiple_comparisons import benjamini_hochberg, benjamini_yekutieli
 from trajectory.scripts.validate_against_genre import (
-    _METRICS,
+    METRICS,
     add_fdr_columns,
     add_genre_breakdown_fdr_columns,
     breakdown_path_for,
@@ -560,7 +560,7 @@ def test_validate_one_model_returns_a_row_per_metric() -> None:
 
     rows, breakdown = validate_one_model("phrase_a", group, _GENRES, _N_HALF_VERSES, 200, 0)
 
-    assert {r["metric"] for r in rows} == set(_METRICS)
+    assert {r["metric"] for r in rows} == set(METRICS)
     assert all(r["model"] == "phrase_a" for r in rows)
     assert breakdown
 

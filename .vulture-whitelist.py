@@ -2,7 +2,7 @@
 
 from genre import evaluate as genre_evaluate
 from genre.scripts import compare_by_genre, compare_calibrated
-from library import ap_gap_auc_bootstrap
+from library import ap_gap_auc_bootstrap, driver
 from parallelism import separation
 from parallelism.scripts import compare_baseline
 
@@ -27,3 +27,6 @@ compare_baseline.mean_baseline_similarity
 #: Psalm centroids are small once pooled, so the genre scripts compare them densely.
 genre_evaluate.evaluate_genre_discrimination_sparse
 compare_by_genre.compare_model_across_genres_sparse
+
+#: Called from the Snakefile, which vulture does not scan.
+driver.cell_provenance
