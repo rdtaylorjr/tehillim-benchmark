@@ -2,9 +2,13 @@
 
 # Named for the pool: "parallelism" here is the Hebrew poetic kind, benchmarked in src/parallelism.
 
+import multiprocessing
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor
+
+#: Fresh interpreters per worker: a forked worker copies the parent's loaded corpus page by page.
+WORKER_CONTEXT = multiprocessing.get_context("spawn")
 
 #: Every backend numpy might link, since each reads only its own variable.
 BLAS_THREAD_VARIABLES = (
@@ -44,5 +48,8 @@ def map_in_order[ItemT, ResultT](
         return [fn(item) for item in items]
     #: Set before the pool spawns, because a worker reads these only as it imports numpy.
     pin_worker_blas_threads()
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    #: One item per worker lifetime, so memory a scored file left behind returns to the OS.
+    with ProcessPoolExecutor(
+        max_workers=workers, mp_context=WORKER_CONTEXT, max_tasks_per_child=1
+    ) as pool:
         return list(pool.map(fn, items, chunksize=chunksize_for(len(items), workers)))

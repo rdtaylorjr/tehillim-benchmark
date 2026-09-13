@@ -303,3 +303,32 @@ def test_dataset_identifier_rejects_a_file_that_carries_no_hive_partition() -> N
 def test_dataset_identifier_rejects_a_file_sitting_directly_in_the_domain_root() -> None:
     with pytest.raises(BenchmarkDataError, match="no Hive partition"):
         dataset_identifier(Path("/data/domain=semantic/model_a.parquet"))
+
+
+def test_readers_release_arrow_memory_after_converting(tmp_path, write_embeddings_parquet) -> None:
+    """Arrow keeps freed buffers reserved, so each read hands them back before returning."""
+    import pyarrow as pa
+
+    from library.embeddings import read_dense_rows
+
+    path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", {1: [1.0, 0.0]})
+    before = pa.total_allocated_bytes()
+    read_dense_rows(path)
+    assert pa.total_allocated_bytes() <= before
+
+
+def test_read_dense_rows_reads_in_batches_into_one_preallocated_matrix(
+    tmp_path, write_embeddings_parquet
+) -> None:
+    """Batches bound Arrow's decode peak to one slice, and every value still lands where it was."""
+    from library.embeddings import read_dense_rows
+
+    vectors = {n: [float(n), float(n) / 2, 0.0] for n in range(1, 11)}
+    path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", vectors)
+    rows = read_dense_rows(path, batch_size=3)
+    assert list(rows) == list(vectors)
+    for node, expected in vectors.items():
+        assert rows[node].dtype == np.float32
+        assert rows[node].tolist() == expected
+    base = rows[1].base if rows[1].base is not None else rows[1]
+    assert all((r.base if r.base is not None else r) is base for r in rows.values())
