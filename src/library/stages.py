@@ -243,11 +243,15 @@ def _genre_cells(roots: Roots, domain: str) -> list[Cell]:
             domain,
             "master",
             "genre.scripts.build_master_report",
-            (raw / "summary.csv", raw / "bootstrap_cis.csv", *(detail / n for n in detail_files)),
+            (
+                raw / "calibrated.csv",
+                raw / "bootstrap_cis.csv",
+                *(detail / n for n in detail_files),
+            ),
             tuple(master / name for name in master_files),
             [
                 "--summary-csv",
-                str(raw / "summary.csv"),
+                str(raw / "calibrated.csv"),
                 "--bootstrap-csv",
                 str(raw / "bootstrap_cis.csv"),
                 "--detail-dir",

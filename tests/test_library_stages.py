@@ -112,6 +112,15 @@ class TestPlanCells:
         assert detail / "pair_detail.parquet" in master.inputs
         assert master.command_args[:2] == ["--retrieval-csv", str(raw / "retrieval.csv")]
 
+    def test_the_genre_master_reads_the_calibrated_scores(self, roots: Roots) -> None:
+        """The master melts effect-size columns that only compare_calibrated writes."""
+        cells = {cell.name: cell for cell in plan_cells(roots)}
+        master = cells["genre.lexical.master"]
+        raw = stage_dir(roots, "genre", "lexical", "raw")
+        assert raw / "calibrated.csv" in master.inputs
+        assert raw / "summary.csv" not in master.inputs
+        assert master.command_args[:2] == ["--summary-csv", str(raw / "calibrated.csv")]
+
     def test_scoring_cells_read_every_dataset_of_their_domain(self, roots: Roots) -> None:
         """A changed dataset anywhere in the domain makes the domain's scoring stale."""
         cells = {cell.name: cell for cell in plan_cells(roots)}
