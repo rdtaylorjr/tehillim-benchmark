@@ -18,6 +18,7 @@ from library.embeddings import (
     load_embeddings,
     load_sparse_embeddings,
 )
+from library.errors import InsufficientDataError
 from library.frame_accumulator import FrameAccumulator
 from library.model_files import uncached_model_paths
 from library.rows_output import write_dataframe_parquet
@@ -98,6 +99,8 @@ def score_model(
         sequences_by_psalm = psalm_half_verse_sequences(half_verses_by_psalm, node_vectors)
         centroids_by_psalm = psalm_centroids(half_verses_by_psalm, node_vectors)
     profiles = compute_psalm_profiles(sequences_by_psalm, centroids_by_psalm)
+    if not profiles:
+        raise InsufficientDataError(f"{model}: no psalm has a complete half-verse sequence")
     return len(profiles), distance_rows(model, profiles)
 
 

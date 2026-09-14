@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from library.errors import InsufficientDataError
 from trajectory.scripts.compute_profiles import (
     compute_psalm_profiles,
     distance_rows,
@@ -106,3 +108,15 @@ def test_score_model_profiles_in_memory_and_returns_its_distance_rows(
     assert [row["model"] for row in rows] == ["mine"]
     assert {row["psalm_a"] for row in rows} == {1}
     assert {row["psalm_b"] for row in rows} == {2}
+
+
+def test_score_model_raises_when_no_psalm_has_a_complete_sequence(
+    tmp_path: Path, write_embeddings_parquet
+) -> None:
+    """A zero-vector half-verse drops from the file, so its psalm has no sequence to profile."""
+    path = write_embeddings_parquet(
+        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        {1: [1.0, 0.0], 2: [0.0, 0.0], 3: [0.7, 0.3], 4: [0.5, 0.5]},
+    )
+    with pytest.raises(InsufficientDataError, match="mine"):
+        score_model(path, {1: [1, 2, 3, 4]})
