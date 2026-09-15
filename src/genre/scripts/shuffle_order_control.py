@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.parallel import map_in_order
 from families.shuffle import Draws, draw, load_draws
 
 from genre.bootstrap import psalm_similarity_matrix
@@ -16,15 +17,10 @@ from genre.evaluate import evaluate_genre_discrimination_from_matrix
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs, filter_pairs_by_genre
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
-from library.cli import (
-    add_genre_csv_argument,
-    add_scoring_arguments,
-    add_shuffle_family_arguments,
-)
+from library.cli import add_genre_csv_argument, add_scoring_arguments, add_shuffle_family_arguments
 from library.errors import BenchmarkDataError
 from library.order_shuffle import order_shuffle_result
 from library.psalm_vectors import draw_psalm_vectors, load_psalm_vectors
-from library.worker_pool import map_in_order
 
 
 def score_genre_ap(

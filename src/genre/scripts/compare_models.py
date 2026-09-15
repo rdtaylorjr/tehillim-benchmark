@@ -6,6 +6,9 @@ from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
+from core.datasets import dataset_identifier
+from core.parallel import map_in_order
+
 from genre.evaluate import evaluate_genre_discrimination
 from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs
@@ -16,11 +19,9 @@ from library.cli import (
     add_scoring_arguments,
     resume_from_cache,
 )
-from library.embeddings import dataset_identifier
 from library.psalm_vectors import load_psalm_vectors
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 
 
 def score_model(

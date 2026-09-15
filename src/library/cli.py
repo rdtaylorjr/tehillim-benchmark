@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from core.cli import add_workers_argument
+
 from library.bhsa import DEFAULT_CHECKOUT
 from library.incremental_cache import load_cached_rows
 from library.model_files import uncached_model_paths
@@ -14,7 +16,6 @@ from library.protocol import (
     DEFAULT_N_PERMUTATIONS,
     DEFAULT_N_RESAMPLES,
 )
-from library.worker_pool import default_max_workers
 
 
 def add_genre_csv_argument(parser: argparse.ArgumentParser) -> None:
@@ -37,11 +38,6 @@ def add_shuffle_family_arguments(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument("--family", required=True, choices=sorted(FAMILIES), metavar="KEY")
     parser.add_argument("--config-root", type=Path, required=True)
-
-
-def add_workers_argument(parser: argparse.ArgumentParser) -> None:
-    """The worker-process count, defaulting to the machine's cores."""
-    parser.add_argument("--workers", type=int, default=default_max_workers())
 
 
 def add_scoring_arguments(

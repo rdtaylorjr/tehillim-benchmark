@@ -1,15 +1,9 @@
 from pathlib import Path
 
 import pytest
+from core.datasets import discover_domains
 
-from library.stages import (
-    BENCHMARK_ROOT,
-    Roots,
-    discover_domains,
-    plan_cells,
-    shuffle_families_for,
-    stage_dir,
-)
+from library.stages import BENCHMARK_ROOT, Roots, plan_cells, shuffle_families_for, stage_dir
 
 
 @pytest.fixture

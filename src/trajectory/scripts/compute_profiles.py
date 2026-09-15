@@ -8,22 +8,18 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.datasets import dataset_identifier, is_sparse_embeddings
+from core.parallel import map_in_order
 
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
 from library.centroid import psalm_centroids, sparse_psalm_centroids
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments
-from library.embeddings import (
-    dataset_identifier,
-    is_sparse_embeddings,
-    load_embeddings,
-    load_sparse_embeddings,
-)
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.errors import InsufficientDataError
 from library.frame_accumulator import FrameAccumulator
 from library.model_files import uncached_model_paths
 from library.rows_output import write_dataframe_parquet
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from trajectory.distance import content_distance, dtw_curve_distance, structural_distance_dtw
 from trajectory.geometry import adjacent_similarity, step_magnitude, turning_angle
 from trajectory.self_similarity import self_similarity_matrix

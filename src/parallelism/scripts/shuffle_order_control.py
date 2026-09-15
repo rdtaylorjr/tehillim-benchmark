@@ -9,19 +9,19 @@ from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
+from core.datasets import is_sparse_embeddings
+from core.parallel import map_in_order
 from families.shuffle import Draws, draw, load_draws
 
 from library.cli import add_scoring_arguments, add_shuffle_family_arguments
 from library.embeddings import (
     drop_zero_norm_vectors,
-    is_sparse_embeddings,
     load_embeddings,
     load_sparse_embeddings,
     sparse_vectors_to_csr,
 )
 from library.order_shuffle import order_shuffle_result
 from library.retrieval_metrics import cosine_similarity_matrix, sparse_cosine_similarity_matrix
-from library.worker_pool import map_in_order
 from parallelism.evaluate import build_side_vectors, build_side_vectors_sparse
 from parallelism.pairs import RetrievalPair, build_retrieval_pairs, filter_pairs_with_vectors
 from parallelism.separation import similarity_separation

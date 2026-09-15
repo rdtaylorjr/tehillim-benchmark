@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from core.datasets import split_model_name
 
-from library.embeddings import split_model_name
 from library.rows_output import write_json
 
 _FIELDS = (

@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
+from core.datasets import dataset_identifier, is_sparse_embeddings
+from core.parallel import map_in_order
 
 from library.bhsa import (
     list_psalms_half_verse_nodes,
@@ -20,12 +22,7 @@ from library.calibration import (
     calibrated_z_score,
 )
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments, report_reuse
-from library.embeddings import (
-    dataset_identifier,
-    is_sparse_embeddings,
-    load_embeddings,
-    load_sparse_embeddings,
-)
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.frame_accumulator import FrameAccumulator
 from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
@@ -38,7 +35,6 @@ from library.retrieval_metrics import (
 )
 from library.rows_output import write_dataframe_parquet
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from parallelism.baseline import build_unmarked_half_verse_pairs
 from parallelism.baseline_comparison import (
     BaselineComparison,

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pandas as pd
+from core.datasets import dataset_identifier, discover_domains
+from core.skips import skipped_in_log
 
-from library.embeddings import dataset_identifier
-from library.stages import BENCHMARK_ROOT, Roots, discover_domains, domain_datasets
+from library.stages import BENCHMARK_ROOT, Roots, domain_datasets
 
 #: Each benchmark's coverage table, and the raw stage whose log explains any skipped dataset.
 MASTER_TABLES: dict[str, tuple[str, str]] = {
@@ -16,7 +16,6 @@ MASTER_TABLES: dict[str, tuple[str, str]] = {
     "genre": ("stage=master/genre_metrics_wide.parquet", "summary"),
     "trajectory": ("stage=raw/trajectory_distances.parquet", "distances"),
 }
-_SKIP_LINE = re.compile(r"^skipping (\S+):", re.MULTILINE)
 
 
 class ParityError(RuntimeError):
@@ -30,13 +29,6 @@ def master_models(roots: Roots, benchmark: str, domain: str) -> set[str]:
     if not path.exists():
         return set()
     return set(pd.read_parquet(path, columns=["model"])["model"].unique())
-
-
-def skipped_in_log(log: Path) -> set[str]:
-    """The dataset names a stage reported skipping, read from its captured log."""
-    if not log.exists():
-        return set()
-    return set(_SKIP_LINE.findall(log.read_text()))
 
 
 def check_parity(roots: Roots, log_root: Path) -> dict[str, dict[str, object]]:

@@ -9,7 +9,7 @@ sys.path.insert(0, str(HERE / "src"))
 from core.driver import render_rules
 from library.driver import ROOT_KEYS, cell_provenance, roots_from_config
 from library.stages import plan_cells
-from library.worker_pool import default_max_workers
+from core.parallel import default_max_workers
 
 ROOTS = roots_from_config(config, default_workers=int(config.get("workers", 4)))
 CELLS = plan_cells(ROOTS)

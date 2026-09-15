@@ -5,14 +5,10 @@ from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
+from core.datasets import is_sparse_embeddings, read_dense_rows, read_sparse_rows
 
 from library.centroid import psalm_centroids, sparse_psalm_centroids
-from library.embeddings import (
-    is_sparse_embeddings,
-    read_dense_rows,
-    read_sparse_rows,
-    sparse_rows_of,
-)
+from library.embeddings import sparse_rows_of
 
 
 def with_direction(centroids: dict[int, np.ndarray]) -> dict[int, np.ndarray]:

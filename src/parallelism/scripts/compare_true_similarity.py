@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.datasets import dataset_identifier, is_sparse_embeddings
+from core.parallel import map_in_order
 
 from library.bhsa import list_psalms_half_verse_nodes
 from library.calibration import (
@@ -15,16 +17,10 @@ from library.calibration import (
     calibrated_effect_size,
 )
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments, resume_from_cache
-from library.embeddings import (
-    dataset_identifier,
-    is_sparse_embeddings,
-    load_embeddings,
-    load_sparse_embeddings,
-)
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.retrieval_metrics import paired_cosine_similarity, sparse_paired_cosine_similarity
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from parallelism.evaluate import build_side_vectors, build_side_vectors_sparse
 from parallelism.pairs import RetrievalPair, build_retrieval_pairs, filter_pairs_with_vectors
 from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups

@@ -7,8 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from core.datasets import is_sparse_embeddings
 
-from library.embeddings import is_sparse_embeddings, load_embeddings, load_sparse_embeddings
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.psalm_vectors import load_psalm_vectors
 
 #: Overridable so the suite is not tied to one checkout layout.

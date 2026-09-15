@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+from core.datasets import dataset_identifier
+from core.parallel import map_in_order
 
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments, resume_from_cache
-from library.embeddings import dataset_identifier
 from library.protocol import DEFAULT_N_GROUP_PERMUTATIONS
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from parallelism.evaluate import score_embedding_file
 from parallelism.pairs import RetrievalPair, build_retrieval_pairs
 from parallelism.tf_features import load_api, read_node_feature_values, reconstruct_groups

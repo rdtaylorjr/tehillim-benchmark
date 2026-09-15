@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.datasets import dataset_identifier, is_sparse_embeddings
+from core.parallel import map_in_order
 
 from library.ap_gap_auc_bootstrap import ci_row
 from library.bhsa import (
@@ -16,15 +18,9 @@ from library.bhsa import (
 )
 from library.calibration import background_similarity_stats, background_similarity_stats_sparse
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments, resume_from_cache
-from library.embeddings import (
-    dataset_identifier,
-    is_sparse_embeddings,
-    load_embeddings,
-    load_sparse_embeddings,
-)
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from parallelism.baseline import build_unmarked_half_verse_pairs
 from parallelism.bootstrap import (
     block_bootstrap_ap_gap_and_auc,

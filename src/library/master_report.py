@@ -1,8 +1,8 @@
 """Shapes a benchmark's scored rows into the long and wide master tables both reports emit."""
 
 import pandas as pd
+from core.datasets import split_model_name
 
-from library.embeddings import split_model_name
 from library.multiple_comparisons import add_fdr_q_values
 
 #: The column set and order both master reports publish, agreed here rather than in each.

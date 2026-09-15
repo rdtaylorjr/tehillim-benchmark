@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.datasets import dataset_identifier
+from core.parallel import map_in_order
 
 from genre.bootstrap import (
     block_bootstrap_genre_ap_gap_and_auc,
@@ -22,11 +24,9 @@ from library.cli import (
     add_scoring_arguments,
     resume_from_cache,
 )
-from library.embeddings import dataset_identifier
 from library.psalm_vectors import load_psalm_vectors
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 
 
 def score_model(

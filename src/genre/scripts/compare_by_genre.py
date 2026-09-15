@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from core.datasets import dataset_identifier
+from core.parallel import map_in_order
 
 from genre.across_genres import (
     GenreRunConfig,
@@ -21,14 +23,12 @@ from library.cli import (
     add_scoring_arguments,
     report_reuse,
 )
-from library.embeddings import dataset_identifier
 from library.incremental_cache import load_cached_rows
 from library.model_files import uncached_model_paths
 from library.multiple_comparisons import add_source_q_columns
 from library.psalm_vectors import load_psalm_vectors
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 
 _SOURCES = ("naive", "perm", "maxT")
 

@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from core.datasets import dataset_identifier
+from core.parallel import map_in_order
 
 from genre.calibrated import compare_genre_calibrated, genre_calibrated_row
 from genre.evaluate import pair_similarities
@@ -20,14 +22,12 @@ from library.cli import (
     add_scoring_arguments,
     report_reuse,
 )
-from library.embeddings import dataset_identifier
 from library.frame_accumulator import FrameAccumulator
 from library.incremental_cache import load_cached_parquet_set
 from library.model_files import uncached_model_paths
 from library.psalm_vectors import load_psalm_vectors
 from library.rows_output import write_dataframe_parquet
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 
 _OUTPUT_FILES = ("genre_pair_detail.parquet", "genre_summary.parquet")
 

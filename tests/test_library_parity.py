@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from core.skips import skipped_in_log
 
-from library.parity import ParityError, check_parity, master_models, skipped_in_log
+from library.parity import ParityError, check_parity, master_models
 from library.stages import Roots
 
 

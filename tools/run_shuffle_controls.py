@@ -8,11 +8,11 @@ from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 
+from core.parallel import default_max_workers
 from families.shuffle import FAMILIES
 
 from library.order_shuffle import DEFAULT_N_SHUFFLES
 from library.shuffle_control_sweep import CONTROLS, Control, Job, pending_jobs, run_job, sweep
-from library.worker_pool import default_max_workers
 
 
 def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:

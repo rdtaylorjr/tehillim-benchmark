@@ -10,18 +10,26 @@ from pathlib import Path
 from typing import Any
 
 import core
+from core.cli import add_workers_argument
 from core.driver import Cell, Plan, provenance_of, run_cell, write_run_manifest
 from core.provenance import code_hash
 
-from library.cli import add_workers_argument
 from library.parity import check_parity
-from library.stages import Roots, plan_cells
+from library.stages import BENCHMARK_ROOT, Roots, plan_cells
 
 BENCHMARK_SRC = Path(__file__).resolve().parents[1]
 EMBEDDINGS_SRC = Path(core.__file__).resolve().parents[1]
-BENCHMARK_PACKAGES: tuple[str, ...] = ("genre", "parallelism", "trajectory", "ui_export", "library")
+#: The shared readers and pool live in core, so a scoring cell's identity follows them there.
+BENCHMARK_PACKAGES: tuple[str, ...] = (
+    "genre",
+    "parallelism",
+    "trajectory",
+    "ui_export",
+    "library",
+    "core",
+)
 #: A shuffle control draws through families.shuffle and its domain's vectorizers, so those count.
-SHUFFLE_PACKAGES: tuple[str, ...] = ("core", "families")
+SHUFFLE_PACKAGES: tuple[str, ...] = ("families",)
 SHUFFLE_MODULE_SUFFIX = ".shuffle_order_control"
 ROOT_KEYS = ("data_root", "embeddings_root", "config_root", "genre_csv", "ui_root")
 
@@ -95,7 +103,9 @@ def main(
     roots = roots_factory(args)
     cells = list(cells_factory(roots))
     if args.command == "manifest":
-        path = write_run_manifest(Plan(runnable=tuple(cells), blocked=()), args.data_root)
+        #: Under the analysis root, since other drivers write their manifests beside this tree.
+        manifest_root = args.data_root / BENCHMARK_ROOT
+        path = write_run_manifest(Plan(runnable=tuple(cells), blocked=()), manifest_root)
         report = parity(roots, args.log_root)
         record = json.loads(path.read_text())
         record["parity"] = report
