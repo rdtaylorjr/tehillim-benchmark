@@ -3,20 +3,16 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import pytest
 from conftest import _write_embeddings_parquet as _write_parquet
+from core.datasets import is_sparse_embeddings
 from core.export import write_sparse_vectors
 
 from library.embeddings import (
-    dataset_identifier,
     drop_zero_norm_vectors,
-    is_sparse_embeddings,
     load_embeddings,
     load_sparse_embeddings,
     sparse_vectors_to_csr,
-    split_model_name,
 )
-from library.errors import BenchmarkDataError
 
 
 def test_load_embeddings_reads_a_real_parquet_file(tmp_path: Path) -> None:
@@ -206,45 +202,6 @@ def test_sparse_vectors_to_csr_drops_a_node_with_no_nonzero_entries() -> None:
     assert matrix.shape == (1, 10)
 
 
-def test_dataset_identifier_reads_model_and_variation_from_the_hive_path() -> None:
-    path = Path("data/domain=semantic/model=bge_m3/text=vocalized/part-0.parquet")
-
-    assert dataset_identifier(path) == "bge_m3_vocalized"
-
-
-def test_dataset_identifier_handles_a_two_level_lexical_path() -> None:
-    path = Path("data/domain=lexical/unit=homograph/construction=binary/part-0.parquet")
-
-    assert dataset_identifier(path) == "homograph_binary"
-
-
-def test_dataset_identifier_handles_a_three_level_path_with_an_extra_text_tier() -> None:
-    path = Path("data/domain=lexical/unit=word/text=consonantal/construction=binary/part-0.parquet")
-
-    assert dataset_identifier(path) == "word_consonantal_binary"
-
-
-def test_split_model_name_extracts_base_and_variant() -> None:
-    assert split_model_name("semantic_gemini_embedding_2_cantillation") == (
-        "gemini_embedding_2",
-        "cantillation",
-    )
-    assert split_model_name("semantic_bge_m3_vocalized") == ("bge_m3", "vocalized")
-
-
-def test_split_model_name_falls_back_to_unknown_variant() -> None:
-    assert split_model_name("semantic_something_odd") == ("something_odd", "unknown")
-
-
-def test_split_model_name_extracts_a_variant_embedded_in_the_middle() -> None:
-    # word_consonantal_binary: unit=word, text=consonantal, construction=binary, not a suffix.
-    assert split_model_name("word_consonantal_binary") == ("word_binary", "consonantal")
-
-
-def test_split_model_name_still_prefers_a_trailing_suffix_variant() -> None:
-    assert split_model_name("bge_m3_vocalized") == ("bge_m3", "vocalized")
-
-
 def test_is_sparse_embeddings_detects_a_sparse_file(tmp_path: Path) -> None:
     path = tmp_path / "sparse.parquet"
     _write_sparse_parquet(path, {7: ([2], [1.0])}, dim=100)
@@ -295,21 +252,10 @@ def test_load_embeddings_returns_float32_for_a_sparse_file(tmp_path: Path) -> No
     assert load_embeddings(path)[7].dtype == np.dtype("<f4")
 
 
-def test_dataset_identifier_rejects_a_file_that_carries_no_hive_partition() -> None:
-    with pytest.raises(BenchmarkDataError, match="no Hive partition"):
-        dataset_identifier(Path("/data/model_a.parquet"))
-
-
-def test_dataset_identifier_rejects_a_file_sitting_directly_in_the_domain_root() -> None:
-    with pytest.raises(BenchmarkDataError, match="no Hive partition"):
-        dataset_identifier(Path("/data/domain=semantic/model_a.parquet"))
-
-
 def test_readers_release_arrow_memory_after_converting(tmp_path, write_embeddings_parquet) -> None:
     """Arrow keeps freed buffers reserved, so each read hands them back before returning."""
     import pyarrow as pa
-
-    from library.embeddings import read_dense_rows
+    from core.datasets import read_dense_rows
 
     path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", {1: [1.0, 0.0]})
     before = pa.total_allocated_bytes()
@@ -321,7 +267,7 @@ def test_read_dense_rows_reads_in_batches_into_one_preallocated_matrix(
     tmp_path, write_embeddings_parquet
 ) -> None:
     """Batches bound Arrow's decode peak to one slice, and every value still lands where it was."""
-    from library.embeddings import read_dense_rows
+    from core.datasets import read_dense_rows
 
     vectors = {n: [float(n), float(n) / 2, 0.0] for n in range(1, 11)}
     path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", vectors)

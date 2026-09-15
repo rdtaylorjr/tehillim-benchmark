@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
+from core.parallel import map_in_order
 
 from genre.genre_labels import load_genre_by_psalm
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
@@ -18,7 +19,6 @@ from library.multiple_comparisons import (
 )
 from library.rows_output import write_rows_csv
 from library.scoring import skipping_unscorable
-from library.worker_pool import map_in_order
 from trajectory.genre_breakdown import joint_genre_breakdown_permutation_test
 from trajectory.residualize import residualize_by_length, residualize_on_covariates
 from trajectory.validation import permutation_test, same_genre_matrix

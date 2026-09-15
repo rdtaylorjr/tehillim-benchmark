@@ -1,10 +1,11 @@
 import argparse
 from pathlib import Path
 
+from core.parallel import default_max_workers
+
 from library.bhsa import DEFAULT_CHECKOUT
 from library.cli import add_scoring_arguments, load_cache
 from library.rows_output import write_rows_csv
-from library.worker_pool import default_max_workers
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -147,7 +148,7 @@ def test_the_embeddings_directory_positional_is_defined_once() -> None:
 
 def test_the_workers_option_has_one_definition_shared_with_the_driver() -> None:
     """The driver's runner takes the same worker option the scoring scripts take."""
-    from library.cli import add_workers_argument
+    from core.cli import add_workers_argument
 
     parser = argparse.ArgumentParser()
     add_workers_argument(parser)

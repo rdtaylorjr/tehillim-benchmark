@@ -1,11 +1,12 @@
 """One rule for a batch scorer meeting a model whose data cannot support the statistic."""
 
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, overload
 
-from library.embeddings import dataset_identifier
+from core.datasets import UnnamedDatasetError, dataset_identifier
+from core.skips import report_skip
+
 from library.errors import BenchmarkDataError
 
 
@@ -20,7 +21,7 @@ class _SkippingUnscorable[ItemT, ResultT]:
         try:
             return self._score(item)
         except BenchmarkDataError as error:
-            print(f"skipping {self._label(item)}: {error}", file=sys.stderr)
+            report_skip(self._label(item), str(error))
             return None
 
 
@@ -29,7 +30,7 @@ def _identify(path: Path) -> str:
     #: Reporting a skip must not raise over the error it reports, so an unnamed file uses its path.
     try:
         return dataset_identifier(path)
-    except BenchmarkDataError:
+    except UnnamedDatasetError:
         return str(path)
 
 

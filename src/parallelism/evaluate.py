@@ -6,8 +6,9 @@ from typing import Literal
 
 import numpy as np
 import scipy.sparse as sp
+from core.datasets import is_sparse_embeddings
 
-from library.embeddings import is_sparse_embeddings, load_embeddings, load_sparse_embeddings
+from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.errors import BenchmarkDataError, InsufficientDataError
 from library.protocol import DEFAULT_N_PERMUTATIONS
 from library.retrieval_metrics import (

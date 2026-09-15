@@ -42,10 +42,11 @@ class TestBenchmarkCodeHash:
         benchmark_code_hash("parallelism.scripts.compare_models", "lexical", fake_hasher)
         assert seen == [(*BENCHMARK_PACKAGES, *SHUFFLE_PACKAGES, "lexical"), BENCHMARK_PACKAGES]
 
-    def test_a_scoring_cell_depends_on_embeddings_only_through_its_dataset_bytes(self) -> None:
-        """Dataset files are hashed inputs, so upstream code stays out of a scoring cell."""
+    def test_a_scoring_cell_depends_on_generators_only_through_its_dataset_bytes(self) -> None:
+        """Dataset files are hashed inputs, so generator code stays out of a scoring cell."""
         from library.driver import BENCHMARK_PACKAGES
 
+        assert "core" in BENCHMARK_PACKAGES
         assert "families" not in BENCHMARK_PACKAGES
         assert "syntactic" not in BENCHMARK_PACKAGES
 
@@ -67,7 +68,7 @@ class TestMain:
             roots_factory=lambda args: None,
             parity=lambda roots, log_root: {"genre.lexical": {"unexplained": []}},
         )
-        record = json.loads((tmp_path / "d/_manifest.json").read_text())
+        record = json.loads((tmp_path / "d/analysis=benchmark/_manifest.json").read_text())
         assert record["missing"] == []
         assert record["expected_cells"] == 1
         assert record["parity"] == {"genre.lexical": {"unexplained": []}}
@@ -91,7 +92,7 @@ class TestMain:
                 roots_factory=lambda args: None,
                 parity=failing,
             )
-        assert (tmp_path / "d/_manifest.json").exists()
+        assert (tmp_path / "d/analysis=benchmark/_manifest.json").exists()
 
     def test_run_executes_the_named_cell_only(self, tmp_path: Path) -> None:
         out = tmp_path / "d/y.csv"

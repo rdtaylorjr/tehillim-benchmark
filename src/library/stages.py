@@ -6,14 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.datasets import discover_domains
 from core.driver import Cell
+from core.spec import PART_FILE
 from families.shuffle import FAMILIES, dataset_source
 
 from library.shuffle_control_sweep import control_filename
 from trajectory.scripts.validate_against_genre import METRICS
 
 BENCHMARK_ROOT = "analysis=benchmark"
-PART_FILE = "part-0.parquet"
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,13 +27,6 @@ class Roots:
     genre_csv: Path
     ui_root: Path
     workers: int
-
-
-def discover_domains(embeddings_root: Path) -> tuple[str, ...]:
-    """The representation domains present in the embeddings tree."""
-    return tuple(
-        sorted(p.name.split("=", 1)[1] for p in embeddings_root.glob("domain=*") if p.is_dir())
-    )
 
 
 def domain_datasets(roots: Roots, domain: str) -> tuple[Path, ...]:
