@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import semantic_file
 
 from library.calibration import BackgroundStats
 from parallelism.node_pairs import as_node_pairs
@@ -181,7 +182,7 @@ def test_score_model_returns_pair_baseline_and_type_scope_rows(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        semantic_file(tmp_path, "mine", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [1.0, 0.0],
@@ -209,4 +210,4 @@ def test_score_model_returns_pair_baseline_and_type_scope_rows(
 
     assert [row["pair_id"] for row in pair_rows] == ["p1", "p2"]
     assert len(baseline_rows) == 2
-    assert {row["model"] for row in scope_rows} == {"mine"}
+    assert {row["model"] for row in scope_rows} == {"mine_consonantal"}

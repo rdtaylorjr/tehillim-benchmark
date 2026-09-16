@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import semantic_file
+
 from parallelism.pairs import RetrievalPair
 from parallelism.scripts.compare_true_similarity import compare_true_similarity, score_model
 
@@ -25,7 +27,7 @@ def test_compare_true_similarity_ranks_by_calibrated_effect_size_descending(
     background_ids = [1, 2, 5, 6, 7, 8]
 
     peaky = write_embeddings_parquet(
-        tmp_path / "domain=x" / "model=peaky" / "v.parquet",
+        semantic_file(tmp_path, "peaky", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [1.0, 0.0],
@@ -36,7 +38,7 @@ def test_compare_true_similarity_ranks_by_calibrated_effect_size_descending(
         },
     )
     spread = write_embeddings_parquet(
-        tmp_path / "domain=x" / "model=spread" / "v.parquet",
+        semantic_file(tmp_path, "spread", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [1.0, 0.0],
@@ -49,7 +51,7 @@ def test_compare_true_similarity_ranks_by_calibrated_effect_size_descending(
 
     rows = compare_true_similarity(pairs, [peaky, spread], background_ids, max_workers=1)
 
-    assert [r["model"] for r in rows] == ["spread", "peaky"]
+    assert [r["model"] for r in rows] == ["spread_consonantal", "peaky_consonantal"]
     assert rows[0]["mean_true_similarity"] == rows[1]["mean_true_similarity"] == 1.0
     assert rows[0]["calibrated_effect_size"] > rows[1]["calibrated_effect_size"]
 
@@ -63,7 +65,7 @@ def test_compare_true_similarity_flattens_per_type_effect_sizes(
     ]
     background_ids = [1, 2, 3, 4, 5, 6]
     path = write_embeddings_parquet(
-        tmp_path / "domain=x" / "model=m" / "v.parquet",
+        semantic_file(tmp_path, "m", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [1.0, 0.0],
@@ -87,8 +89,8 @@ def test_score_model_matches_a_parallel_run_exactly(
     pairs = [_pair("p1", (1,), (2,), "Synonymous")]
     background_ids = [1, 2, 5, 6]
     vectors = {1: [1.0, 0.0], 2: [1.0, 0.0], 5: [0.0, 1.0], 6: [-1.0, 0.0]}
-    first = write_embeddings_parquet(tmp_path / "domain=x" / "model=a" / "v.parquet", vectors)
-    second = write_embeddings_parquet(tmp_path / "domain=x" / "model=b" / "v.parquet", vectors)
+    first = write_embeddings_parquet(semantic_file(tmp_path, "a", "v.parquet"), vectors)
+    second = write_embeddings_parquet(semantic_file(tmp_path, "b", "v.parquet"), vectors)
 
     sequential = compare_true_similarity(pairs, [first, second], background_ids, max_workers=1)
     parallel = compare_true_similarity(pairs, [first, second], background_ids, max_workers=2)
@@ -101,6 +103,6 @@ def test_score_model_row_is_named_after_the_files_dataset_identifier(
 ) -> None:
     pairs = [_pair("p1", (1,), (2,), "Synonymous")]
     vectors = {1: [1.0, 0.0], 2: [1.0, 0.0], 5: [0.0, 1.0], 6: [-1.0, 0.0]}
-    path = write_embeddings_parquet(tmp_path / "domain=x" / "model=peaky" / "v.parquet", vectors)
+    path = write_embeddings_parquet(semantic_file(tmp_path, "peaky", "v.parquet"), vectors)
 
-    assert score_model(path, pairs, [1, 2, 5, 6])["model"] == "peaky"
+    assert score_model(path, pairs, [1, 2, 5, 6])["model"] == "peaky_consonantal"

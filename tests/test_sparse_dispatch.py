@@ -6,7 +6,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-from conftest import _write_sparse_embeddings_parquet
+from conftest import _write_sparse_embeddings_parquet, semantic_file
 
 from parallelism.node_pairs import as_node_pairs, retrieval_pairs_as_node_pairs
 from parallelism.pairs import RetrievalPair
@@ -42,8 +42,8 @@ def both_files(tmp_path: Path) -> tuple[Path, Path]:
     """The same vectors written once densely and once sparsely."""
     vectors = _vectors()
     #: Both layouts sit under a Hive partition, the only shape a batch run ever names a model from.
-    dense = tmp_path / "domain=semantic/model=dense/vectors.parquet"
-    sparse = tmp_path / "domain=semantic/model=sparse/vectors.parquet"
+    dense = semantic_file(tmp_path, "dense", "vectors.parquet")
+    sparse = semantic_file(tmp_path, "sparse", "vectors.parquet")
     write_dense(dense, vectors)
     _write_sparse_embeddings_parquet(sparse, vectors)
     return dense, sparse

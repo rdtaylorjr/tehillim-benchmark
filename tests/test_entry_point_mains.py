@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import SCOPE_DIR
 from families.shuffle import Draws, build_lexical, by_psalm
 from lexical.corpus import LexicalPsalm
 from lexical.positional import positional_icf_vectors
@@ -56,14 +57,16 @@ def genre_csv(tmp_path: Path) -> Path:
 @pytest.fixture
 def embeddings_dir(tmp_path: Path, write_embeddings_parquet) -> Path:
     """Two models over the same nodes, so a batch has more than one row to rank."""
-    directory = tmp_path / "embeddings" / "domain=semantic"
+    directory = tmp_path / "embeddings" / SCOPE_DIR / "domain=semantic"
     for offset, model in enumerate(("model_a", "model_b")):
         vectors = {
             node: [float(psalm), float(node % 10), float(offset)]
             for psalm, nodes in HALF_VERSES.items()
             for node in nodes
         }
-        write_embeddings_parquet(directory / f"model={model}" / "vectors.parquet", vectors)
+        write_embeddings_parquet(
+            directory / f"model={model}" / "text=consonantal" / "vectors.parquet", vectors
+        )
     return directory
 
 
@@ -78,7 +81,7 @@ class TestGenreCompareModels:
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
     def test_ranks_the_stronger_model_first(
         self, genre_csv: Path, embeddings_dir: Path, tmp_path: Path, bhsa_api_over
@@ -157,7 +160,7 @@ class TestParallelismCompareModels:
             api_factory=lambda _checkout: parallel_bhsa_api_over(HALF_VERSES, PARALLEL_ANNOTATIONS),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
     def test_ranks_by_separation_auc(
         self, embeddings_dir: Path, tmp_path: Path, parallel_bhsa_api_over
@@ -194,7 +197,7 @@ class TestGenreComputeBootstrapCis:
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
 
 class TestGenreCompareByGenre:
@@ -257,7 +260,7 @@ class TestParallelismCompareBaseline:
             api_factory=lambda _checkout: parallel_bhsa_api_over(HALF_VERSES, PARALLEL_ANNOTATIONS),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
 
 class TestParallelismCompareTrueSimilarity:
@@ -271,7 +274,7 @@ class TestParallelismCompareTrueSimilarity:
             api_factory=lambda _checkout: parallel_bhsa_api_over(HALF_VERSES, PARALLEL_ANNOTATIONS),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
 
 class TestParallelismComputeBootstrapCis:
@@ -295,7 +298,7 @@ class TestParallelismComputeBootstrapCis:
             api_factory=lambda _checkout: parallel_bhsa_api_over(HALF_VERSES, PARALLEL_ANNOTATIONS),
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
 
 class TestParallelismExportDetail:
@@ -391,15 +394,13 @@ class TestGenreBuildMasterReport:
 @pytest.fixture
 def shuffled_embeddings_dir(tmp_path: Path, write_embeddings_parquet) -> Path:
     """Enough order-shuffle draws for BH q <= 0.05 to be reachable across the two genres."""
-    directory = tmp_path / "shuffled" / "domain=semantic"
+    directory = tmp_path / "shuffled" / SCOPE_DIR / "domain=semantic" / "model=null"
     rng = np.random.default_rng(0)
     for draw in range(1, N_SHUFFLE_DRAWS + 1):
         vectors = {
             node: rng.normal(size=3).tolist() for nodes in HALF_VERSES.values() for node in nodes
         }
-        write_embeddings_parquet(
-            directory / f"construction=shuffle{draw:04d}" / "v.parquet", vectors
-        )
+        write_embeddings_parquet(directory / f"text=shuffle{draw:04d}" / "v.parquet", vectors)
     return directory
 
 
@@ -578,7 +579,7 @@ class TestTrajectoryValidateAgainstGenre:
             api_factory=api,
         )
 
-        assert set(pd.read_csv(output)["model"]) == {"model_a", "model_b"}
+        assert set(pd.read_csv(output)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
 
 
 class TestTrajectoryExportUiRows:

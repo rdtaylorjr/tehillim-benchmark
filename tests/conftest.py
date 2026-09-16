@@ -48,6 +48,15 @@ def _write_sparse_embeddings_parquet(
     return path
 
 
+#: The scope every benchmark reads: the Masoretic Psalms at the accentual half-verse.
+SCOPE_DIR = "corpus=bhsa/unit=half_verse"
+
+
+def semantic_file(root: Path, model: str, name: str = "part-0.parquet") -> Path:
+    """A fixture's place in the tree: one semantic model at the consonantal tier."""
+    return root / SCOPE_DIR / "domain=semantic" / f"model={model}" / "text=consonantal" / name
+
+
 @pytest.fixture
 def write_sparse_embeddings_parquet():
     """Factory writing a sparse embeddings Parquet file at a given path."""

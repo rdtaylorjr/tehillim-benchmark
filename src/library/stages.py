@@ -6,15 +6,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.datasets import discover_domains
+from core.datasets import discover_domains, domain_root
 from core.driver import Cell
-from core.spec import PART_FILE
+from core.partition import BHSA_HALF_VERSE, PART_FILE, Scope
 from families.shuffle import FAMILIES, dataset_source
 
 from library.shuffle_control_sweep import control_filename
 from trajectory.scripts.validate_against_genre import METRICS
 
 BENCHMARK_ROOT = "analysis=benchmark"
+
+#: The benchmarks score the Masoretic Psalms at the accentual half-verse, since their labels
+#: (parallel pairs, genres, trajectories) are keyed to BHSA half-verse nodes; no other scope of
+#: the embeddings tree is read.
+SCOPE: Scope = BHSA_HALF_VERSE
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +34,14 @@ class Roots:
     workers: int
 
 
+def domain_dir(roots: Roots, domain: str) -> Path:
+    """The directory of one domain's datasets under the scope the benchmarks read."""
+    return domain_root(roots.embeddings_root, SCOPE, domain)
+
+
 def domain_datasets(roots: Roots, domain: str) -> tuple[Path, ...]:
     """Every dataset file of one domain, which every domain-sweeping stage reads."""
-    return tuple(sorted((roots.embeddings_root / f"domain={domain}").rglob(PART_FILE)))
+    return tuple(sorted(domain_dir(roots, domain).rglob(PART_FILE)))
 
 
 def stage_dir(roots: Roots, benchmark: str, domain: str, stage: str) -> Path:
@@ -72,7 +82,7 @@ def _workers(roots: Roots) -> list[str]:
 def _parallelism_cells(roots: Roots, domain: str) -> list[Cell]:
     """The parallelism chain for one domain: raw scores, detail, shuffle controls, master."""
     datasets = domain_datasets(roots, domain)
-    embeddings_dir = roots.embeddings_root / f"domain={domain}"
+    embeddings_dir = domain_dir(roots, domain)
     raw = stage_dir(roots, "parallelism", domain, "raw")
     detail = stage_dir(roots, "parallelism", domain, "detail")
     master = stage_dir(roots, "parallelism", domain, "master")
@@ -160,7 +170,7 @@ def _parallelism_cells(roots: Roots, domain: str) -> list[Cell]:
 def _genre_cells(roots: Roots, domain: str) -> list[Cell]:
     """The genre chain for one domain: raw scores, detail, shuffle controls, master."""
     datasets = domain_datasets(roots, domain)
-    embeddings_dir = roots.embeddings_root / f"domain={domain}"
+    embeddings_dir = domain_dir(roots, domain)
     raw = stage_dir(roots, "genre", domain, "raw")
     detail = stage_dir(roots, "genre", domain, "detail")
     master = stage_dir(roots, "genre", domain, "master")
@@ -261,7 +271,7 @@ def _genre_cells(roots: Roots, domain: str) -> list[Cell]:
 def _trajectory_cells(roots: Roots, domain: str) -> list[Cell]:
     """The trajectory chain for one domain: distances, genre validation, interface rows."""
     datasets = domain_datasets(roots, domain)
-    embeddings_dir = roots.embeddings_root / f"domain={domain}"
+    embeddings_dir = domain_dir(roots, domain)
     raw = stage_dir(roots, "trajectory", domain, "raw")
     ui = stage_dir(roots, "trajectory", domain, "ui")
     distances = raw / "trajectory_distances.parquet"
@@ -399,7 +409,7 @@ def plan_cells(roots: Roots) -> list[Cell]:
     """Every cell for every domain the embeddings tree holds."""
     return [
         cell
-        for domain in discover_domains(roots.embeddings_root)
+        for domain in discover_domains(roots.embeddings_root, SCOPE)
         for build in BUILDERS
         for cell in build(roots, domain)
     ]

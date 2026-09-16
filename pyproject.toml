@@ -1,6 +1,6 @@
 [project]
 name = "tehillim-benchmark"
-version = "0.7.3"
+version = "0.7.4"
 description = "Evaluates embedding models against Psalms parallelism and genre benchmarks."
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -11,7 +11,7 @@ dependencies = [
     "pandas>=2.2",
     "scikit-learn>=1.4",
     "numba>=0.60",
-    "embeddings>=0.9.3",
+    "embeddings>=0.10.0",
 ]
 
 [project.optional-dependencies]

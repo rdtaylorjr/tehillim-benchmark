@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from conftest import semantic_file
 from core.parallel import default_max_workers
 
 from library.bhsa import DEFAULT_CHECKOUT
@@ -96,23 +97,23 @@ def test_resume_reads_the_cache_and_lists_only_what_is_left(tmp_path: Path) -> N
 
     embeddings = tmp_path / "data"
     for model in ("a", "b"):
-        target = embeddings / f"domain=d/model={model}/part-0.parquet"
+        target = semantic_file(embeddings, model)
         target.parent.mkdir(parents=True)
         target.write_bytes(b"")
     cache = tmp_path / "prior.csv"
-    write_rows_csv(cache, [{"model": "a", "score": "1"}])
+    write_rows_csv(cache, [{"model": "a_consonantal", "score": "1"}])
 
     cached_rows, pending = resume_from_cache(embeddings, cache)
 
-    assert [row["model"] for row in cached_rows] == ["a"]
-    assert [p.parent.name for p in pending] == ["model=b"]
+    assert [row["model"] for row in cached_rows] == ["a_consonantal"]
+    assert pending == [semantic_file(embeddings, "b")]
 
 
 def test_resume_scores_everything_when_there_is_no_cache(tmp_path: Path) -> None:
     from library.cli import resume_from_cache
 
     embeddings = tmp_path / "data"
-    target = embeddings / "domain=d/model=a/part-0.parquet"
+    target = semantic_file(embeddings, "a", "part-0.parquet")
     target.parent.mkdir(parents=True)
     target.write_bytes(b"")
 
@@ -143,7 +144,8 @@ def test_the_embeddings_directory_positional_is_defined_once() -> None:
     add_embeddings_dir_argument(parser)
     add_scoring_arguments(parser)
 
-    assert parser.parse_args(["data/domain=lexical"]).embeddings_dir == Path("data/domain=lexical")
+    directory = "data/corpus=bhsa/unit=half_verse/domain=lexical"
+    assert parser.parse_args([directory]).embeddings_dir == Path(directory)
 
 
 def test_the_workers_option_has_one_definition_shared_with_the_driver() -> None:
