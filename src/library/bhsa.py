@@ -148,6 +148,27 @@ def list_psalms_half_verses_by_psalm(api: Any) -> dict[int, list[int]]:
     return result
 
 
+def list_psalms_words_by_verse(api: Any) -> dict[tuple[int, int], list[int]]:
+    """Every word node keyed by (psalm, verse) in text order, so a verse position is an index."""
+    L, T = api.L, api.T  # noqa: N806
+    book_node = psalms_book_node(api)
+    result: dict[tuple[int, int], list[int]] = {}
+    for chapter_node in L.d(book_node, otype="chapter"):
+        for verse_node in L.d(chapter_node, otype="verse"):
+            _, psalm_number, verse_number = T.sectionFromNode(verse_node)
+            result[(psalm_number, verse_number)] = list(L.d(verse_node, otype="word"))
+    return result
+
+
+def list_psalms_words_by_half_verse(api: Any) -> dict[int, list[int]]:
+    """Every half-verse node with its word nodes in text order, the extent an embedding covers."""
+    L = api.L  # noqa: N806
+    return {
+        half_verse: list(L.d(half_verse, otype="word"))
+        for half_verse in list_psalms_half_verse_nodes(api)
+    }
+
+
 def node_to_psalm_map(half_verses_by_psalm: dict[int, list[int]]) -> dict[int, int]:
     """Inverts a psalm-to-nodes mapping into a node-to-psalm lookup."""
     return {node: psalm for psalm, nodes in half_verses_by_psalm.items() for node in nodes}

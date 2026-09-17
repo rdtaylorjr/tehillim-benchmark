@@ -2,19 +2,24 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 from conftest import _write_embeddings_parquet as _write_parquet
+from conftest import whole_psalm_passages
 from families.shuffle import Draws
 
 from genre.bootstrap import psalm_similarity_matrix
-from genre.evaluate import evaluate_genre_discrimination
+from genre.evaluate import evaluate_genre_discrimination, index_genre_pairs
 from genre.pairs import build_genre_pairs, filter_pairs_by_genre
 from genre.scripts.shuffle_order_control import (
+    NullContext,
+    Register,
     genre_ap,
     require_scoreable,
     score_built_seed,
     score_genre_ap,
     shuffled_scores_by_genre,
 )
+from library.centroid import uniform_weights
 from library.errors import BenchmarkDataError
 
 
@@ -22,8 +27,8 @@ class TestScoreGenreAp:
     def test_perfect_genre_clustering_scores_ap_one(self, tmp_path: Path) -> None:
         # Psalms 1-2 share Lament, psalms 3-4 share Praise: two tight clusters, well separated.
         genre_by_psalm = {1: "Lament", 2: "Lament", 3: "Praise", 4: "Praise"}
-        pairs = build_genre_pairs(genre_by_psalm)
-        half_verses_by_psalm = {1: [10], 2: [11], 3: [12], 4: [13]}
+        pairs = index_genre_pairs(build_genre_pairs(whole_psalm_passages(genre_by_psalm)))
+        half_verses_by_psalm = uniform_weights({"1": [10], "2": [11], "3": [12], "4": [13]})
         path = tmp_path / "embeddings.parquet"
         _write_parquet(
             path,
@@ -36,8 +41,8 @@ class TestScoreGenreAp:
 
     def test_returns_one_score_per_requested_genre(self, tmp_path: Path) -> None:
         genre_by_psalm = {1: "Lament", 2: "Lament", 3: "Praise", 4: "Praise"}
-        pairs = build_genre_pairs(genre_by_psalm)
-        half_verses_by_psalm = {1: [10], 2: [11], 3: [12], 4: [13]}
+        pairs = index_genre_pairs(build_genre_pairs(whole_psalm_passages(genre_by_psalm)))
+        half_verses_by_psalm = uniform_weights({"1": [10], "2": [11], "3": [12], "4": [13]})
         path = tmp_path / "embeddings.parquet"
         _write_parquet(
             path,
@@ -51,8 +56,8 @@ class TestScoreGenreAp:
     def test_pools_a_psalm_s_half_verse_vectors_into_one_centroid(self, tmp_path: Path) -> None:
         # Psalm 1's two half-verses average to [1,0], matching psalm 2 exactly: still perfect AP.
         genre_by_psalm = {1: "Lament", 2: "Lament", 3: "Praise", 4: "Praise"}
-        pairs = build_genre_pairs(genre_by_psalm)
-        half_verses_by_psalm = {1: [10, 11], 2: [12], 3: [13], 4: [14]}
+        pairs = index_genre_pairs(build_genre_pairs(whole_psalm_passages(genre_by_psalm)))
+        half_verses_by_psalm = uniform_weights({"1": [10, 11], "2": [12], "3": [13], "4": [14]})
         path = tmp_path / "embeddings.parquet"
         _write_parquet(
             path,
@@ -96,7 +101,7 @@ class TestShuffledScoresByGenre:
 #: Two psalms a genre, tight within genre and orthogonal across it, so every AP is defined.
 BUILT_VECTORS = {10: [1.0, 0.0], 11: [1.0, 0.0], 12: [0.0, 1.0], 13: [0.0, 1.0]}
 GENRE_BY_PSALM = {1: "Lament", 2: "Lament", 3: "Praise", 4: "Praise"}
-HALF_VERSES_BY_PSALM = {1: [10], 2: [11], 3: [12], 4: [13]}
+HALF_VERSES_BY_PSALM = uniform_weights({"1": [10], "2": [11], "3": [12], "4": [13]})
 
 
 def _draws(vectors: dict[int, object], sparse_width: int | None) -> Draws:
@@ -124,7 +129,8 @@ class TestScoreBuiltSeed:
     """The fused control scores a draw it built, which must match the file it replaces."""
 
     def _arguments(self) -> tuple[list[object], list[str]]:
-        return build_genre_pairs(GENRE_BY_PSALM), ["Lament", "Praise"]
+        pairs = index_genre_pairs(build_genre_pairs(whole_psalm_passages(GENRE_BY_PSALM)))
+        return pairs, ["Lament", "Praise"]
 
     def test_scores_a_dense_draw_as_it_scores_the_written_file(self, tmp_path: Path) -> None:
         pairs, genres = self._arguments()
@@ -132,29 +138,42 @@ class TestScoreBuiltSeed:
         _write_parquet(path, BUILT_VECTORS)
         dense = {node: np.array(values, dtype="<f4") for node, values in BUILT_VECTORS.items()}
 
-        built = score_built_seed(_draws(dense, None), HALF_VERSES_BY_PSALM, pairs, genres, seed=1)
+        register = Register(None, HALF_VERSES_BY_PSALM, pairs, genres, None)
+        built = score_built_seed(NullContext(_draws(dense, None), (register,)), seed=1)
 
-        assert built == score_genre_ap(path, HALF_VERSES_BY_PSALM, pairs, genres)
+        assert built == [score_genre_ap(path, HALF_VERSES_BY_PSALM, pairs, genres)]
 
     def test_scores_a_sparse_draw_as_it_scores_the_dense_draw_it_matches(self) -> None:
         pairs, genres = self._arguments()
         dense = {node: np.array(values, dtype="<f4") for node, values in BUILT_VECTORS.items()}
 
+        register = Register(None, HALF_VERSES_BY_PSALM, pairs, genres, None)
         sparse = score_built_seed(
-            _draws(_sparse(BUILT_VECTORS), 2), HALF_VERSES_BY_PSALM, pairs, genres, seed=1
+            NullContext(_draws(_sparse(BUILT_VECTORS), 2), (register,)), seed=1
         )
 
-        assert sparse == score_built_seed(
-            _draws(dense, None), HALF_VERSES_BY_PSALM, pairs, genres, seed=1
-        )
+        assert sparse == score_built_seed(NullContext(_draws(dense, None), (register,)), seed=1)
+
+    def test_one_draw_scores_every_register_it_is_given(self) -> None:
+        """Three registers share one draw per seed, so a family is built once, not three times."""
+        pairs, genres = self._arguments()
+        dense = {node: np.array(values, dtype="<f4") for node, values in BUILT_VECTORS.items()}
+        register = Register("song", HALF_VERSES_BY_PSALM, pairs, genres, None)
+        narrower = Register("song_component", HALF_VERSES_BY_PSALM, pairs, genres[:1], None)
+
+        scores = score_built_seed(NullContext(_draws(dense, None), (register, narrower)), seed=1)
+
+        assert len(scores) == 2
+        assert list(scores[1]) == genres[:1]
+        assert scores[1][genres[0]] == scores[0][genres[0]]
 
 
 class TestGenreApSharesOneSimilarityMatrix:
     """Every genre reads one psalm matrix, so a seed builds it once rather than once per genre."""
 
-    def _vectors(self) -> dict[int, np.ndarray]:
+    def _vectors(self) -> dict[str, np.ndarray]:
         rng = np.random.default_rng(11)
-        return {psalm: rng.normal(size=48).astype("<f4") for psalm in range(1, 13)}
+        return {str(psalm): rng.normal(size=48).astype("<f4") for psalm in range(1, 13)}
 
     def _labels(self) -> dict[int, str]:
         names = ["Lament", "Praise", "Hymn", "Royal"]
@@ -163,10 +182,10 @@ class TestGenreApSharesOneSimilarityMatrix:
     def test_it_matches_scoring_each_genre_against_its_own_matrix(self) -> None:
         """A shared matrix must not move a single value, since the arithmetic is unchanged."""
         vectors = self._vectors()
-        pairs = build_genre_pairs(self._labels())
+        pairs = build_genre_pairs(whole_psalm_passages(self._labels()))
         genres = sorted(set(self._labels().values()))
 
-        shared = genre_ap(vectors, pairs, genres)
+        shared = genre_ap(vectors, index_genre_pairs(pairs), genres)
         per_genre = {
             genre: evaluate_genre_discrimination(
                 filter_pairs_by_genre(pairs, genre), vectors
@@ -174,7 +193,7 @@ class TestGenreApSharesOneSimilarityMatrix:
             for genre in genres
         }
 
-        assert shared == per_genre
+        assert shared == pytest.approx(per_genre, abs=1e-12)
 
     def test_the_matrix_is_built_once_no_matter_how_many_genres_are_scored(self) -> None:
         builds: list[int] = []
@@ -186,7 +205,7 @@ class TestGenreApSharesOneSimilarityMatrix:
         genres = sorted(set(self._labels().values()))
         genre_ap(
             self._vectors(),
-            build_genre_pairs(self._labels()),
+            index_genre_pairs(build_genre_pairs(whole_psalm_passages(self._labels()))),
             genres,
             similarity_matrix=_counting_matrix,
         )
@@ -210,3 +229,34 @@ class TestUnscoreableFamilyIsRefused:
     def test_the_message_names_the_family_so_a_sweep_says_which_one_failed(self) -> None:
         with pytest.raises(BenchmarkDataError, match="syntactic/phrase/subphrase_rela/1_2gram"):
             require_scoreable({"Lament": float("nan")}, "syntactic/phrase/subphrase_rela/1_2gram")
+
+
+class TestSparseDrawsScoreAsDenseOnes:
+    """A sparse family never densifies its draw and scores as the dense route would."""
+
+    def test_sparse_and_dense_routes_agree(self) -> None:
+        rng = np.random.default_rng(4)
+        labels = {psalm: ["Lament", "Praise"][psalm % 2] for psalm in range(1, 9)}
+        pairs = index_genre_pairs(build_genre_pairs(whole_psalm_passages(labels)))
+        genres = ["Lament", "Praise"]
+        half_verses = uniform_weights(
+            {str(psalm): [psalm * 10, psalm * 10 + 1] for psalm in range(1, 9)}
+        )
+        dense = {
+            node: (rng.random(6) < 0.5).astype("<f4") * rng.random(6).astype("<f4")
+            for nodes in half_verses.values()
+            for node in nodes
+        }
+        rows = sp.csr_matrix(np.stack([dense[node] for node in sorted(dense)]))
+        from library.psalm_vectors import sparse_item_vectors
+
+        sparse_scores = genre_ap(
+            sparse_item_vectors(sorted(dense), rows, half_verses), pairs, genres
+        )
+        dense_scores = genre_ap(
+            {p: np.mean([dense[n] for n in nodes], axis=0) for p, nodes in half_verses.items()},
+            pairs,
+            genres,
+        )
+
+        assert sparse_scores == pytest.approx(dense_scores, abs=1e-9)

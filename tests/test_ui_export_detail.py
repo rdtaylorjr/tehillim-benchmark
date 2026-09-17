@@ -8,9 +8,10 @@ from ui_export.detail import (
     build_trajectory_detail,
     genre_mean_matrix,
     heatmap_cells,
-    order_psalms_by_own_stat,
+    order_items_by_own_stat,
     raincloud_group,
     roc_pr_series,
+    thin_curve,
     validated_gap_stats_for,
 )
 
@@ -64,7 +65,7 @@ def test_heatmap_cells_carries_psalm_ids_and_rounded_value() -> None:
     assert cells == [{"psalm_a": 1, "psalm_b": 2, "value": 0.3333}]
 
 
-def test_order_psalms_by_own_stat_groups_by_genre_then_descending_value() -> None:
+def test_order_items_by_own_stat_groups_by_genre_then_descending_value() -> None:
     genre_by_psalm = {1: "Hymn", 2: "Hymn", 3: "Lament"}
     same_genre_df = pd.DataFrame(
         [
@@ -72,12 +73,50 @@ def test_order_psalms_by_own_stat_groups_by_genre_then_descending_value() -> Non
             {"psalm_a": 3, "psalm_b": 3, "value": 0.9},
         ]
     )
-    order = order_psalms_by_own_stat(same_genre_df, "value", genre_by_psalm)
+    order = order_items_by_own_stat(same_genre_df, "value", genre_by_psalm)
     assert order == [
         {"psalm": 1, "genre": "Hymn"},
         {"psalm": 2, "genre": "Hymn"},
         {"psalm": 3, "genre": "Lament"},
     ]
+
+
+def test_heatmap_cells_and_order_take_passage_ids_under_another_key() -> None:
+    df = pd.DataFrame([{"item_a": "9:1-5:Danklied", "item_b": "23", "value": 0.5}])
+    assert heatmap_cells(df, "value", key="item") == [
+        {"item_a": "9:1-5:Danklied", "item_b": "23", "value": 0.5}
+    ]
+    order = order_items_by_own_stat(df, "value", {"23": "A", "9:1-5:Danklied": "B"}, key="item")
+    assert order == [{"item": "23", "genre": "A"}, {"item": "9:1-5:Danklied", "genre": "B"}]
+
+
+def test_thin_curve_keeps_the_ends_and_one_point_per_grid_step() -> None:
+    """A step curve sampled at the grid is drawn identically to the full curve at that width."""
+    x = np.linspace(0.0, 1.0, 10_001)
+    y = x**2
+    tx, ty = thin_curve(x, y, points=100)
+    assert len(tx) <= 101
+    assert (tx[0], tx[-1]) == (0.0, 1.0)
+    assert (ty[0], ty[-1]) == (0.0, 1.0)
+    assert np.all(np.diff(tx) > 0)
+
+
+def test_thin_curve_leaves_a_short_curve_whole() -> None:
+    x = np.array([0.0, 0.5, 1.0])
+    y = np.array([0.0, 0.7, 1.0])
+    tx, ty = thin_curve(x, y, points=512)
+    np.testing.assert_array_equal(tx, x)
+    np.testing.assert_array_equal(ty, y)
+
+
+def test_roc_pr_series_is_bounded_in_size_however_many_pairs_it_ranks() -> None:
+    rng = np.random.default_rng(0)
+    labels = rng.integers(0, 2, size=20_000)
+    scores = rng.random(20_000)
+    series = roc_pr_series("Combined", labels, scores, n=int(labels.sum()))
+    assert len(series["roc"]) <= 514
+    assert len(series["pr"]) <= 514
+    assert all(len(str(p["fpr"]).split(".")[-1]) <= 4 for p in series["roc"])
 
 
 def test_load_auc_ap_ci_reads_the_matching_model_and_scope_row() -> None:
@@ -218,28 +257,31 @@ def test_build_parallelism_detail_passes_through_auc_ap_stats_when_given() -> No
     assert detail["auc_ap_stats"] == stats
 
 
+ITEMS = {"1": (1, "Ps 1"), "2": (2, "Ps 2"), "3": (3, "Ps 3"), "4": (4, "Ps 4")}
+
+
 def _genre_pair_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "psalm_a": 1,
-                "psalm_b": 2,
+                "item_a": "1",
+                "item_b": "2",
                 "genre_a": "Hymn",
                 "genre_b": "Hymn",
                 "same_genre": True,
                 "calibrated_z": 1.2,
             },
             {
-                "psalm_a": 3,
-                "psalm_b": 4,
+                "item_a": "3",
+                "item_b": "4",
                 "genre_a": "Lament",
                 "genre_b": "Lament",
                 "same_genre": True,
                 "calibrated_z": 0.8,
             },
             {
-                "psalm_a": 1,
-                "psalm_b": 3,
+                "item_a": "1",
+                "item_b": "3",
                 "genre_a": "Hymn",
                 "genre_b": "Lament",
                 "same_genre": False,
@@ -250,20 +292,28 @@ def _genre_pair_df() -> pd.DataFrame:
 
 
 def test_build_genre_detail_has_a_combined_group_and_one_group_per_observed_genre() -> None:
-    detail = build_genre_detail(_genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None)
+    detail = build_genre_detail(
+        _genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None, items=ITEMS
+    )
     keys = {g["key"] for g in detail["raincloud_groups"]}
     assert keys == {"different", "combined", "Hymn", "Lament"}
 
 
 def test_build_genre_detail_heatmap_covers_every_pair_row() -> None:
-    detail = build_genre_detail(_genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None)
+    detail = build_genre_detail(
+        _genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None, items=ITEMS
+    )
     assert len(detail["heatmap"]) == 3
 
 
 def test_build_genre_detail_genre_order_covers_every_psalm_seen_in_the_pairs() -> None:
-    detail = build_genre_detail(_genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None)
-    psalms = {e["psalm"] for e in detail["genre_order"]}
-    assert psalms == {1, 2, 3, 4}
+    detail = build_genre_detail(
+        _genre_pair_df(), genres=["Hymn", "Lament"], auc_ap_stats=None, items=ITEMS
+    )
+    assert {e["psalm"] for e in detail["genre_order"]} == {1, 2, 3, 4}
+    assert {e["item"] for e in detail["genre_order"]} == set(ITEMS)
+    assert detail["genre_order"][0]["label"].startswith("Ps ")
+    assert {"item_a", "item_b", "value"} == set(detail["heatmap"][0])
 
 
 def test_build_trajectory_detail_reports_both_controlled_sources() -> None:
@@ -279,8 +329,8 @@ def test_build_trajectory_detail_reports_both_controlled_sources() -> None:
                 "length_and_content_controlled": 0.3,
             },
             {
-                "psalm_a": 1,
-                "psalm_b": 3,
+                "item_a": "1",
+                "item_b": "3",
                 "genre_a": "Hymn",
                 "genre_b": "Lament",
                 "same_genre": False,

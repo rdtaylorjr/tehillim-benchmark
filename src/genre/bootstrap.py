@@ -1,116 +1,124 @@
 """Vertex-resampling BCa bootstrap CI (Efron 1987) for genre AP, gap, and AUC."""
 
-from collections.abc import Iterator
+from dataclasses import dataclass
 
 import numpy as np
 
 from library.ap_gap_auc_bootstrap import (
+    MIN_PER_SIDE,
     ApGapAucCI,
-    Split,
-    bootstrap_ap_gap_and_auc,
+    Statistics,
+    bootstrap_ci_from_statistics,
+    has_enough_per_side,
+    point_ap_gap_and_auc,
 )
 from library.calibration import BackgroundStats
 from library.errors import InsufficientDataError
 from library.protocol import DEFAULT_N_RESAMPLES
 from library.retrieval_metrics import cosine_similarity_matrix
+from library.weighted_metrics import WeightedStatistics, sort_pairs, weighted_ap_gap_auc
 
 
 def psalm_similarity_matrix(
-    psalm_ids: list[int], psalm_vectors: dict[int, np.ndarray]
+    psalm_ids: list[str], psalm_vectors: dict[str, np.ndarray]
 ) -> np.ndarray:
-    """N x N cosine similarity between psalm centroids, ordered to match psalm_ids."""
+    """N x N cosine similarity between item centroids, ordered to match psalm_ids."""
     vectors = np.stack([psalm_vectors[p] for p in psalm_ids])
     return cosine_similarity_matrix(vectors, vectors)
 
 
 def build_similarity_and_genre_matrices(
-    psalm_ids: list[int], psalm_vectors: dict[int, np.ndarray], genre_by_psalm: dict[int, str]
+    psalm_ids: list[str], psalm_vectors: dict[str, np.ndarray], genre_by_psalm: dict[str, str]
 ) -> tuple[np.ndarray, np.ndarray]:
     """N x N cosine similarity and genre-match matrices, ordered to match psalm_ids."""
     genres = np.array([genre_by_psalm[p] for p in psalm_ids])
     return psalm_similarity_matrix(psalm_ids, psalm_vectors), genres[:, None] == genres[None, :]
 
 
-def _split_by_pair_indices(
-    psalm_a: np.ndarray,
-    psalm_b: np.ndarray,
-    similarity_matrix: np.ndarray,
-    genre_match_matrix: np.ndarray,
-    population_mask: np.ndarray | None,
-) -> Split:
-    """Same/different similarities for the given psalm-index pairs, within population_mask."""
-    sims = similarity_matrix[psalm_a, psalm_b]
-    same = genre_match_matrix[psalm_a, psalm_b]
-    if population_mask is not None:
-        keep = population_mask[psalm_a, psalm_b]
-        sims, same = sims[keep], same[keep]
-    return sims[same], sims[~same]
+@dataclass(frozen=True, slots=True)
+class PopulationPairs:
+    """The pairs a CI is read over: endpoints, scores, and same-genre flags, in one fixed order."""
+
+    rows: np.ndarray
+    cols: np.ndarray
+    scores: np.ndarray
+    positive: np.ndarray
 
 
-def _upper_triangle_same_and_different(
+def population_pairs(
     similarity_matrix: np.ndarray,
     genre_match_matrix: np.ndarray,
     population_mask: np.ndarray | None = None,
-) -> Split:
-    """Splits the strict upper triangle into same/different sims, restricted to population_mask."""
+) -> PopulationPairs:
+    """The strict upper triangle restricted to population_mask, as one pair list."""
     rows, cols = np.triu_indices(similarity_matrix.shape[0], k=1)
-    return _split_by_pair_indices(
-        rows, cols, similarity_matrix, genre_match_matrix, population_mask
+    if population_mask is not None:
+        keep = population_mask[rows, cols]
+        rows, cols = rows[keep], cols[keep]
+    return PopulationPairs(
+        rows=rows,
+        cols=cols,
+        scores=similarity_matrix[rows, cols],
+        positive=genre_match_matrix[rows, cols],
     )
 
 
-def _resample_split(
-    psalm_indices: np.ndarray,
-    similarity_matrix: np.ndarray,
-    genre_match_matrix: np.ndarray,
-    population_mask: np.ndarray | None,
-) -> Split:
-    """One vertex resample's split, dropping pairs of a drawn psalm with its own duplicate copy."""
-    rows, cols = np.triu_indices(len(psalm_indices), k=1)
-    psalm_a, psalm_b = psalm_indices[rows], psalm_indices[cols]
-    # A psalm drawn twice would otherwise pair with itself at similarity 1.0, always same-genre.
-    distinct = psalm_a != psalm_b
-    return _split_by_pair_indices(
-        psalm_a[distinct],
-        psalm_b[distinct],
-        similarity_matrix,
-        genre_match_matrix,
-        population_mask,
-    )
+def own_clusters(n: int) -> np.ndarray:
+    """Every item its own cluster, the case of one passage per psalm."""
+    return np.arange(n, dtype=np.intp)
 
 
-def _leave_one_out_splits(
-    n: int,
-    similarity_matrix: np.ndarray,
-    genre_match_matrix: np.ndarray,
-    population_mask: np.ndarray | None,
-) -> Iterator[Split]:
-    """Each psalm's leave-one-out split, in psalm order, for the BCa acceleration jackknife."""
-    all_idx = np.arange(n)
-    rows, cols = np.triu_indices(n - 1, k=1)
-    for i in range(n):
-        keep = all_idx[all_idx != i]
-        yield _split_by_pair_indices(
-            keep[rows], keep[cols], similarity_matrix, genre_match_matrix, population_mask
+def cluster_multiplicities(
+    clusters: np.ndarray, n_resamples: int, rng: np.random.Generator
+) -> np.ndarray:
+    """How often each item is drawn per resample, its cluster drawn with replacement each time."""
+    codes, item_cluster = np.unique(clusters, return_inverse=True)
+    n_clusters = len(codes)
+    #: One draw per resample from the one generator, so the draws are those of a sequential loop.
+    drawn = (
+        np.stack(
+            [
+                np.bincount(
+                    rng.choice(n_clusters, size=n_clusters, replace=True), minlength=n_clusters
+                )
+                for _ in range(n_resamples)
+            ]
         )
+        if n_resamples > 0
+        else np.empty((0, n_clusters), dtype=np.intp)
+    )
+    return drawn[:, item_cluster]
 
 
-def _vertex_resamples(
-    n: int,
-    n_resamples: int,
-    rng: np.random.Generator,
-    similarity_matrix: np.ndarray,
-    genre_match_matrix: np.ndarray,
-    population_mask: np.ndarray | None,
-) -> Iterator[Split]:
-    """n_resamples draws of the psalm population itself, with replacement."""
-    for _ in range(n_resamples):
-        idx = rng.choice(n, size=n, replace=True)
-        yield _resample_split(idx, similarity_matrix, genre_match_matrix, population_mask)
+def resample_weights(multiplicities: np.ndarray, pairs: PopulationPairs) -> np.ndarray:
+    """Each pair's count in each resample: the product of its endpoints' multiplicities."""
+    weights: np.ndarray = multiplicities[:, pairs.rows] * multiplicities[:, pairs.cols]
+    return weights
+
+
+def jackknife_weights(clusters: np.ndarray, pairs: PopulationPairs) -> np.ndarray:
+    """One row per cluster in code order: the pairs touching neither endpoint of that cluster."""
+    codes = np.unique(clusters)
+    touched = (clusters[pairs.rows][None, :] == codes[:, None]) | (
+        clusters[pairs.cols][None, :] == codes[:, None]
+    )
+    weights: np.ndarray = (~touched).astype(np.float64)
+    return weights
+
+
+def _valid_statistics(statistics: WeightedStatistics, keep_invalid: bool) -> Statistics:
+    """(AP, gap, AUC) where both sides reached MIN_PER_SIDE, dropped or left NaN otherwise."""
+    enough = (statistics.positive_weight >= MIN_PER_SIDE) & (
+        statistics.negative_weight >= MIN_PER_SIDE
+    )
+    if keep_invalid:
+        blank = np.where(enough, 0.0, np.nan)
+        return statistics.ap + blank, statistics.gap + blank, statistics.auc + blank
+    return statistics.ap[enough], statistics.gap[enough], statistics.auc[enough]
 
 
 def block_bootstrap_genre_ap_gap_and_auc(
-    psalm_ids: list[int],
+    psalm_ids: list[str],
     similarity_matrix: np.ndarray,
     genre_match_matrix: np.ndarray,
     background: BackgroundStats,
@@ -118,19 +126,33 @@ def block_bootstrap_genre_ap_gap_and_auc(
     *,
     rng: np.random.Generator,
     population_mask: np.ndarray | None = None,
+    clusters: np.ndarray | None = None,
 ) -> ApGapAucCI:
     """BCa 95% CI for AP (primary), gap, and AUC, resampling whole psalms with replacement."""
     n = len(psalm_ids)
-    observed = _upper_triangle_same_and_different(
-        similarity_matrix, genre_match_matrix, population_mask
+    #: Passages of one psalm are not independent, so the psalm is the unit drawn, not the passage.
+    cluster_of = own_clusters(n) if clusters is None else clusters
+    pairs = population_pairs(similarity_matrix, genre_match_matrix, population_mask)
+    if len(pairs.scores) == 0:
+        raise InsufficientDataError(f"no genre pairs available among {n} items")
+    positive, negative = pairs.scores[pairs.positive], pairs.scores[~pairs.positive]
+    if not has_enough_per_side((positive, negative)):
+        raise InsufficientDataError(
+            f"AP and AUC need at least {MIN_PER_SIDE} values on each side, got "
+            f"{len(positive)} positive and {len(negative)} negative"
+        )
+    point = point_ap_gap_and_auc(positive, negative, background)
+    prevalence = len(positive) / len(pairs.scores)
+
+    sorted_pairs = sort_pairs(pairs.scores, pairs.positive)
+    multiplicities = cluster_multiplicities(cluster_of, n_resamples, rng)
+    resampled = weighted_ap_gap_auc(
+        sorted_pairs, resample_weights(multiplicities, pairs), background
     )
-    if len(observed[0]) + len(observed[1]) == 0:
-        raise InsufficientDataError(f"no genre pairs available among {n} psalms")
-    return bootstrap_ap_gap_and_auc(
-        observed,
-        _vertex_resamples(
-            n, n_resamples, rng, similarity_matrix, genre_match_matrix, population_mask
-        ),
-        _leave_one_out_splits(n, similarity_matrix, genre_match_matrix, population_mask),
-        background,
+    jackknife = weighted_ap_gap_auc(sorted_pairs, jackknife_weights(cluster_of, pairs), background)
+    return bootstrap_ci_from_statistics(
+        point,
+        prevalence,
+        _valid_statistics(resampled, keep_invalid=False),
+        _valid_statistics(jackknife, keep_invalid=True),
     )

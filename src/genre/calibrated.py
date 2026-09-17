@@ -28,7 +28,7 @@ class GenreCalibratedComparison:
 
 
 def compare_genre_calibrated(
-    pairs: list[GenrePair], psalm_vectors: dict[int, np.ndarray], background: BackgroundStats
+    pairs: list[GenrePair], psalm_vectors: dict[str, np.ndarray], background: BackgroundStats
 ) -> GenreCalibratedComparison:
     """Same-genre vs different-genre similarity: AP/AUC plus each group's calibrated effect size."""
     usable, similarities = pair_similarities(pairs, psalm_vectors)

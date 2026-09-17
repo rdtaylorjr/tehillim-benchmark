@@ -310,7 +310,7 @@ def validate_models(
     rows: list[dict[str, Any]] = []
     breakdown: list[dict[str, str | int | float]] = []
     scored = map_in_order(
-        skipping_unscorable(_validate_task, label=_task_model), tasks, max_workers
+        skipping_unscorable(_validate_task, label=_task_model), tasks, max_workers, label="models"
     )
     for result in scored:
         if result is None:

@@ -114,7 +114,7 @@ def main(
         baseline_pairs=baseline_pairs,
         background_node_ids=background_node_ids,
     )
-    scored = map_in_order(skipping_unscorable(score), model_paths, args.workers)
+    scored = map_in_order(skipping_unscorable(score), model_paths, args.workers, label="models")
     rows.extend(row for row in scored if row is not None)
     rows.sort(key=lambda r: r["average_precision"], reverse=True)
 

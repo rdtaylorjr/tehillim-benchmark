@@ -72,7 +72,7 @@ def compare_models(
 ) -> list[dict[str, str | int | float]]:
     """Scores every model file across workers, rows sorted by separation AUC descending."""
     score = partial(score_model, pairs=pairs, n_permutations=n_permutations, seed=seed)
-    scored = map_in_order(skipping_unscorable(score), model_paths, max_workers)
+    scored = map_in_order(skipping_unscorable(score), model_paths, max_workers, label="models")
     rows = [row for row in scored if row is not None]
     rows.sort(key=lambda r: cast("float", r["separation_auc"]), reverse=True)
     return rows

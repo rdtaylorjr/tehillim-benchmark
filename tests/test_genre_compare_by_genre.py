@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
-from conftest import semantic_file
+from conftest import fake_words, semantic_file
 
 from genre.across_genres import (
     GenreRunConfig,
@@ -13,15 +13,25 @@ from genre.across_genres import (
     compare_model_across_genres_sparse,
 )
 from genre.pairs import build_genre_pairs
+from genre.passages import Passage
 from genre.scripts.compare_by_genre import add_fdr_columns, load_cached_genre_rows, score_model
+from library.centroid import uniform_weights
 from library.errors import BenchmarkDataError
 from library.scoring import skipping_unscorable
+
+
+def _passages(genre_by_psalm: dict[int, str]) -> list[Passage]:
+    """One whole-psalm passage per labelled psalm, its one half-verse node numbered as the psalm."""
+    return [
+        Passage(str(p), p, genre, tuple(fake_words(p)), f"Ps {p}")
+        for p, genre in sorted(genre_by_psalm.items())
+    ]
 
 
 def _config(genre_by_psalm, genres, pairs) -> GenreRunConfig:
     """The fixture's run configuration, at the small resampling budget the tests use."""
     return GenreRunConfig(
-        genre_by_psalm=genre_by_psalm,
+        passages=_passages(genre_by_psalm),
         genres=genres,
         pairs=pairs,
         n_permutations=50,
@@ -49,17 +59,17 @@ def _fixture():
         7: "Wisdom",
     }
     psalm_vectors = {
-        1: np.array([1.0, 0.0]),
-        2: np.array([0.95, 0.05]),
-        3: np.array([0.9, 0.1]),
-        4: np.array([0.0, 1.0]),
-        5: np.array([0.05, 0.95]),
-        6: np.array([0.5, 0.5]),
-        7: np.array([0.55, 0.45]),
+        "1": np.array([1.0, 0.0]),
+        "2": np.array([0.95, 0.05]),
+        "3": np.array([0.9, 0.1]),
+        "4": np.array([0.0, 1.0]),
+        "5": np.array([0.05, 0.95]),
+        "6": np.array([0.5, 0.5]),
+        "7": np.array([0.55, 0.45]),
     }
     genres = ("Lament", "Praise", "Wisdom")
-    pairs = build_genre_pairs(genre_by_psalm)
-    psalm_ids = sorted(genre_by_psalm)
+    pairs = build_genre_pairs(_passages(genre_by_psalm))
+    psalm_ids = [str(p) for p in sorted(genre_by_psalm)]
     return psalm_ids, psalm_vectors, genre_by_psalm, genres, pairs
 
 
@@ -310,12 +320,12 @@ class TestScoreModel:
         _psalm_ids, psalm_vectors, genre_by_psalm, genres, pairs = _fixture()
         path = write_embeddings_parquet(
             semantic_file(tmp_path, "mine", "v.parquet"),
-            {psalm: vector.tolist() for psalm, vector in psalm_vectors.items()},
+            {int(psalm): vector.tolist() for psalm, vector in psalm_vectors.items()},
         )
 
         rows = score_model(
             path,
-            {psalm: [psalm] for psalm in psalm_vectors},
+            uniform_weights({psalm: [int(psalm)] for psalm in psalm_vectors}),
             _config(genre_by_psalm, genres, pairs),
         )
 
@@ -331,11 +341,11 @@ class TestScoreModel:
         )
         score = partial(
             score_model,
-            half_verses_by_psalm={1: [1]},
+            half_verses_by_psalm=uniform_weights({"1": [1]}),
             config=GenreRunConfig(
-                genre_by_psalm={1: "Lament"},
+                passages=_passages({1: "Lament"}),
                 genres=("Lament",),
-                pairs=build_genre_pairs({1: "Lament"}),
+                pairs=build_genre_pairs(_passages({1: "Lament"})),
                 n_permutations=10,
                 n_resamples=10,
                 seed=0,

@@ -4,7 +4,7 @@ import pandas as pd
 
 from library.rows_output import json_safe
 from ui_export import export
-from ui_export.export import build_domain_data
+from ui_export.export import GenreTables, build_domain_data, slice_name
 
 
 def _parallelism_overall_df() -> pd.DataFrame:
@@ -127,6 +127,37 @@ def _genre_by_genre_df() -> pd.DataFrame:
     )
 
 
+def _baseline_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "predictor": "shorter_side",
+                "n_same_genre": 500,
+                "n_different_genre": 4700,
+                "prevalence": 0.28,
+                "average_precision": 0.3,
+                "separation_auc": 0.52,
+                "separation_p": 0.2,
+            }
+        ]
+    )
+
+
+def _genre(
+    overall: pd.DataFrame | None = None, by_genre: pd.DataFrame | None = None
+) -> list[GenreTables]:
+    """One register's tables, Logos over whole psalms unless a frame is supplied."""
+    return [
+        GenreTables(
+            "logos",
+            None,
+            _genre_overall_df() if overall is None else overall,
+            _genre_by_genre_df() if by_genre is None else by_genre,
+            _baseline_df(),
+        )
+    ]
+
+
 def _trajectory_rows() -> list[dict]:
     return [{"model": "bge_m3_vocalized", "metric": "content_distance", "raw_p": 0.001}]
 
@@ -135,8 +166,7 @@ def test_build_domain_data_selects_only_the_uis_parallelism_overall_columns() ->
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -161,8 +191,7 @@ def test_build_domain_data_keeps_scope_in_parallelism_by_type() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -174,8 +203,7 @@ def test_build_domain_data_selects_parallelism_by_type_columns() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -201,8 +229,7 @@ def test_build_domain_data_drops_psalm_level_models_from_parallelism_overall() -
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -230,8 +257,7 @@ def test_build_domain_data_drops_psalm_level_shuffle_control_models_from_paralle
     data = build_domain_data(
         parallelism_overall,
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -243,8 +269,7 @@ def test_build_domain_data_drops_psalm_level_models_from_parallelism_by_type() -
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -269,8 +294,7 @@ def test_build_domain_data_keeps_psalm_level_models_in_genre_tables() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        genre_overall,
-        _genre_by_genre_df(),
+        _genre(genre_overall),
         _trajectory_rows(),
     )
 
@@ -282,16 +306,18 @@ def test_build_domain_data_selects_genre_overall_columns() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
     row = data["genre_overall"][0]
+    assert (row["taxonomy"], row["unit"]) == ("logos", None)
     assert set(row) == {
         "model",
         "model_base",
         "text_variant",
+        "taxonomy",
+        "unit",
         "separation_auc",
         "auc_ci_low",
         "auc_ci_high",
@@ -308,8 +334,7 @@ def test_build_domain_data_selects_genre_by_genre_columns() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -318,6 +343,8 @@ def test_build_domain_data_selects_genre_by_genre_columns() -> None:
         "model",
         "model_base",
         "text_variant",
+        "taxonomy",
+        "unit",
         "genre",
         "separation_auc",
         "auc_ci_low",
@@ -338,8 +365,7 @@ def test_build_domain_data_derives_model_base_and_text_variant_for_genre_by_genr
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        genre_by_genre,
+        _genre(by_genre=genre_by_genre),
         _trajectory_rows(),
     )
 
@@ -352,30 +378,67 @@ def test_build_domain_data_passes_trajectory_rows_through_unchanged() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
     assert data["trajectory"] == _trajectory_rows()
 
 
-def test_build_domain_data_has_exactly_the_six_ui_keys() -> None:
+def test_build_domain_data_has_exactly_the_ui_keys() -> None:
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
     assert set(data) == {
         "parallelism_overall",
         "parallelism_by_type",
+        "genre_registers",
         "genre_overall",
         "genre_by_genre",
+        "genre_baseline",
         "trajectory",
         "trajectory_by_genre",
+    }
+
+
+def test_build_domain_data_tags_every_registers_rows_and_catalogs_its_labels() -> None:
+    gunkel = GenreTables(
+        "gunkel",
+        "song",
+        _genre_overall_df(),
+        _genre_by_genre_df().assign(genre="Hymnus"),
+        _baseline_df(),
+    )
+    data = build_domain_data(
+        _parallelism_overall_df(),
+        _parallelism_by_type_df(),
+        [*_genre(), gunkel],
+        _trajectory_rows(),
+    )
+
+    assert data["genre_registers"] == [
+        {"taxonomy": "logos", "unit": None, "genres": ["Wisdom"]},
+        {"taxonomy": "gunkel", "unit": "song", "genres": ["Hymnus"]},
+    ]
+    assert [(r["taxonomy"], r["unit"]) for r in data["genre_overall"]] == [
+        ("logos", None),
+        ("gunkel", "song"),
+    ]
+    assert [r["genre"] for r in data["genre_by_genre"]] == ["Wisdom", "Hymnus"]
+    assert [r["predictor"] for r in data["genre_baseline"]] == ["shorter_side", "shorter_side"]
+    assert set(data["genre_baseline"][0]) == {
+        "taxonomy",
+        "unit",
+        "predictor",
+        "average_precision",
+        "separation_auc",
+        "prevalence",
+        "n_same_genre",
+        "n_different_genre",
     }
 
 
@@ -383,8 +446,7 @@ def test_build_domain_data_defaults_trajectory_by_genre_to_an_empty_list() -> No
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
     )
 
@@ -396,8 +458,7 @@ def test_build_domain_data_passes_trajectory_by_genre_rows_through_unchanged() -
     data = build_domain_data(
         _parallelism_overall_df(),
         _parallelism_by_type_df(),
-        _genre_overall_df(),
-        _genre_by_genre_df(),
+        _genre(),
         _trajectory_rows(),
         by_genre_rows,
     )
@@ -475,8 +536,7 @@ def test_build_domain_data_drops_shuffle_control_models_from_every_table() -> No
     data = build_domain_data(
         parallelism_overall,
         parallelism_by_type,
-        genre_overall,
-        genre_by_genre,
+        _genre(genre_overall, genre_by_genre),
         trajectory_rows,
         trajectory_by_genre_rows,
     )
@@ -516,7 +576,7 @@ def test_exported_payload_is_strict_json() -> None:
 
 
 def test_split_payloads_separates_the_per_genre_trajectory_rows() -> None:
-    """The by-genre section is 79% of the payload and is read by one view, so it ships apart."""
+    """The by-genre section is most of the payload and is read by one view, so it ships apart."""
     data = {
         "genre_overall": [{"model": "a"}],
         "trajectory_by_genre": [
@@ -528,10 +588,32 @@ def test_split_payloads_separates_the_per_genre_trajectory_rows() -> None:
 
     assert "trajectory_by_genre" not in core["semantic"]
     assert core["semantic"]["genre_overall"] == [{"model": "a"}]
-    assert set(slices) == {"structural_distance", "turning_angle_distance"}
-    assert slices["structural_distance"]["semantic"]["trajectory_by_genre"] == [
+    assert set(slices) == {"trajectory_structural_distance", "trajectory_turning_angle_distance"}
+    assert slices["trajectory_structural_distance"]["semantic"]["trajectory_by_genre"] == [
         {"model": "a", "metric": "structural_distance", "genre": "Hymn"}
     ]
+
+
+def test_split_payloads_separates_the_by_genre_rows_of_each_register() -> None:
+    data = {
+        "genre_by_genre": [
+            {"model": "a", "taxonomy": "logos", "unit": None, "genre": "Hymn"},
+            {"model": "a", "taxonomy": "gunkel", "unit": "song", "genre": "Hymnus"},
+        ],
+    }
+    core, slices = export.split_payloads("semantic", data)
+
+    assert "genre_by_genre" not in core["semantic"]
+    assert set(slices) == {"genre_logos", "genre_gunkel_song"}
+    assert slices["genre_gunkel_song"]["semantic"]["genre_by_genre"][0]["genre"] == "Hymnus"
+
+
+def test_slice_name_drops_a_missing_unit() -> None:
+    assert slice_name("genre_by_genre", {"taxonomy": "logos", "unit": None}) == "genre_logos"
+    assert (
+        slice_name("genre_by_genre", {"taxonomy": "gunkel", "unit": "song_component"})
+        == "genre_gunkel_song_component"
+    )
 
 
 def test_split_payloads_yields_no_slices_when_there_are_no_by_genre_rows() -> None:

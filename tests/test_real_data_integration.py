@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from core.datasets import is_sparse_embeddings
 
+from library.centroid import uniform_weights
 from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.psalm_vectors import load_psalm_vectors
 
@@ -76,7 +77,7 @@ def test_psalm_centroids_agree_between_the_two_storage_forms() -> None:
     node_ids, _ = load_sparse_embeddings(SPARSE)
     groups = _psalm_groups(node_ids)
 
-    sparse_pooled = load_psalm_vectors(SPARSE, groups)
+    sparse_pooled = load_psalm_vectors(SPARSE, uniform_weights(groups))
     dense_rows = load_embeddings(SPARSE)
     for psalm, nodes in groups.items():
         expected = np.mean([dense_rows[n] for n in nodes], axis=0)

@@ -1,7 +1,7 @@
 """Psalm vertex-resampling BCa bootstrap 95% CIs for AP (primary), gap, and AUC, every model."""
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -14,14 +14,21 @@ from genre.bootstrap import (
     block_bootstrap_genre_ap_gap_and_auc,
     build_similarity_and_genre_matrices,
 )
-from genre.genre_labels import load_genre_by_psalm
+from genre.passages import (
+    Passage,
+    admissible_mask,
+    cluster_codes,
+    load_half_verse_weights,
+    load_passages,
+)
 from library.ap_gap_auc_bootstrap import ci_row
-from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from library.bhsa import load_bhsa_api
 from library.calibration import background_stats_from_matrix
+from library.centroid import Weights
 from library.cli import (
     add_embeddings_dir_argument,
-    add_genre_csv_argument,
     add_scoring_arguments,
+    add_taxonomy_arguments,
     resume_from_cache,
 )
 from library.psalm_vectors import load_psalm_vectors
@@ -31,17 +38,18 @@ from library.scoring import skipping_unscorable
 
 def score_model(
     path: Path,
-    half_verses_by_psalm: dict[int, list[int]],
-    genre_by_psalm: dict[int, str],
+    passages: list[Passage],
+    weights: Mapping[str, Weights],
     n_resamples: int,
     seed: int,
 ) -> dict[str, str | int | float]:
-    """One model file's CI row, raising when its psalm population cannot support a CI."""
+    """One model file's CI row, raising when its passage population cannot support a CI."""
     model = dataset_identifier(path)
-    psalm_vectors = load_psalm_vectors(path, half_verses_by_psalm)
-    psalm_ids = sorted(psalm_vectors)
+    psalm_vectors = load_psalm_vectors(path, weights)
+    scored = [passage for passage in passages if passage.id in psalm_vectors]
+    psalm_ids = [passage.id for passage in scored]
     similarity_matrix, genre_match_matrix = build_similarity_and_genre_matrices(
-        psalm_ids, psalm_vectors, genre_by_psalm
+        psalm_ids, psalm_vectors, {passage.id: passage.gattung for passage in scored}
     )
     background = background_stats_from_matrix(similarity_matrix)
     result = block_bootstrap_genre_ap_gap_and_auc(
@@ -51,6 +59,8 @@ def score_model(
         background,
         n_resamples=n_resamples,
         rng=np.random.default_rng(seed),
+        population_mask=admissible_mask(scored),
+        clusters=cluster_codes(scored),
     )
     return ci_row(model, result)
 
@@ -62,26 +72,27 @@ def main(
 ) -> None:
     """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_genre_csv_argument(parser)
+    add_taxonomy_arguments(parser)
     add_embeddings_dir_argument(parser)
     add_scoring_arguments(parser, with_seed=True, with_resamples=True)
     args = parser.parse_args(argv)
 
     api = api_factory(args.checkout)
-    genre_by_psalm = load_genre_by_psalm(args.genre_csv)
-    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
+    passages = load_passages(args.taxonomy, args.unit, args.labels_csv, api)
 
     rows, model_paths = resume_from_cache(args.embeddings_dir, args.output)
     score = partial(
         score_model,
-        half_verses_by_psalm=half_verses_by_psalm,
-        genre_by_psalm=genre_by_psalm,
+        passages=passages,
+        weights=load_half_verse_weights(passages, api),
         n_resamples=args.n_resamples,
         seed=args.seed,
     )
     rows.extend(
         row
-        for row in map_in_order(skipping_unscorable(score), model_paths, args.workers)
+        for row in map_in_order(
+            skipping_unscorable(score), model_paths, args.workers, label="models"
+        )
         if row is not None
     )
 

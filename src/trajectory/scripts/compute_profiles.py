@@ -12,7 +12,7 @@ from core.datasets import dataset_identifier, is_sparse_embeddings
 from core.parallel import map_in_order
 
 from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
-from library.centroid import psalm_centroids, sparse_psalm_centroids
+from library.centroid import psalm_centroids, sparse_psalm_centroids, uniform_weights
 from library.cli import add_embeddings_dir_argument, add_scoring_arguments
 from library.embeddings import load_embeddings, load_sparse_embeddings
 from library.errors import InsufficientDataError
@@ -87,13 +87,15 @@ def score_model(
         sequences_by_psalm = psalm_half_verse_sequences_sparse(
             half_verses_by_psalm, node_ids, matrix
         )
-        psalms, centroids = sparse_psalm_centroids(half_verses_by_psalm, node_ids, matrix)
+        psalms, centroids = sparse_psalm_centroids(
+            uniform_weights(half_verses_by_psalm), node_ids, matrix
+        )
         dense_centroids = centroids.toarray().astype("<f4", copy=False)
         centroids_by_psalm = {p: dense_centroids[i] for i, p in enumerate(psalms)}
     else:
         node_vectors = load_embeddings(path)
         sequences_by_psalm = psalm_half_verse_sequences(half_verses_by_psalm, node_vectors)
-        centroids_by_psalm = psalm_centroids(half_verses_by_psalm, node_vectors)
+        centroids_by_psalm = psalm_centroids(uniform_weights(half_verses_by_psalm), node_vectors)
     profiles = compute_psalm_profiles(sequences_by_psalm, centroids_by_psalm)
     if not profiles:
         raise InsufficientDataError(f"{model}: no psalm has a complete half-verse sequence")
@@ -119,7 +121,9 @@ def main(
     distances = FrameAccumulator()
     n_profiles = 0
     score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm)
-    for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+    for scored in map_in_order(
+        skipping_unscorable(score), model_paths, args.workers, label="models"
+    ):
         if scored is None:
             continue
         model_n_profiles, model_distance_rows = scored

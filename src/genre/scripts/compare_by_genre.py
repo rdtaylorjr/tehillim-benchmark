@@ -1,7 +1,7 @@
 """One-vs-rest genre discrimination per model: AP/AUC, jackknife CIs, and permutation p-values."""
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -14,13 +14,14 @@ from genre.across_genres import (
     GenreRunConfig,
     compare_model_across_genres,
 )
-from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import build_genre_pairs
-from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from genre.passages import load_half_verse_weights, load_passages
+from library.bhsa import load_bhsa_api
+from library.centroid import Weights
 from library.cli import (
     add_embeddings_dir_argument,
-    add_genre_csv_argument,
     add_scoring_arguments,
+    add_taxonomy_arguments,
     report_reuse,
 )
 from library.incremental_cache import load_cached_rows
@@ -69,13 +70,13 @@ def add_fdr_columns(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
 def score_model(
     path: Path,
-    half_verses_by_psalm: dict[int, list[int]],
+    half_verses_by_psalm: Mapping[str, Weights],
     config: GenreRunConfig,
 ) -> list[dict[str, str | int | float]]:
     """One row per genre for one model file, scored independently of every other model."""
     model = dataset_identifier(path)
     psalm_vectors = load_psalm_vectors(path, half_verses_by_psalm)
-    psalm_ids = sorted(set(config.genre_by_psalm) & set(psalm_vectors))
+    psalm_ids = [passage.id for passage in config.passages if passage.id in psalm_vectors]
     return compare_model_across_genres(model, psalm_ids, psalm_vectors, config)
 
 
@@ -86,7 +87,7 @@ def main(
 ) -> None:
     """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_genre_csv_argument(parser)
+    add_taxonomy_arguments(parser)
     add_embeddings_dir_argument(parser)
     parser.add_argument(
         "--cache",
@@ -98,10 +99,10 @@ def main(
     args = parser.parse_args(argv)
 
     api = api_factory(args.checkout)
-    genre_by_psalm = load_genre_by_psalm(args.genre_csv)
-    pairs = build_genre_pairs(genre_by_psalm)
-    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
-    genres = tuple(sorted(set(genre_by_psalm.values())))
+    passages = load_passages(args.taxonomy, args.unit, args.labels_csv, api)
+    pairs = build_genre_pairs(passages)
+    half_verses_by_psalm = load_half_verse_weights(passages, api)
+    genres = tuple(sorted({passage.gattung for passage in passages}))
 
     cache_path = args.cache or args.output
     rows, cached_models = load_cached_genre_rows(cache_path) if cache_path else ([], set())
@@ -109,7 +110,7 @@ def main(
 
     model_paths = uncached_model_paths(args.embeddings_dir, cached_models)
     config = GenreRunConfig(
-        genre_by_psalm=genre_by_psalm,
+        passages=passages,
         genres=genres,
         pairs=pairs,
         n_permutations=args.n_permutations,
@@ -117,7 +118,9 @@ def main(
         seed=args.seed,
     )
     score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, config=config)
-    for model_rows in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+    for model_rows in map_in_order(
+        skipping_unscorable(score), model_paths, args.workers, label="models"
+    ):
         if model_rows is None:
             continue
         rows.extend(model_rows)

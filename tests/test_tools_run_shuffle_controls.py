@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from library.shuffle_control_sweep import Control, Job
+from library.shuffle_control_sweep import Job
+from library.stages import SCOPE, genre_registers
 from tools.run_shuffle_controls import main, parse_arguments
 
 
@@ -22,6 +23,10 @@ class TestParseArguments:
                 "/emb/config",
                 "--genre-csv",
                 "/g.csv",
+                "--gunkel-csv",
+                "/gunkel.csv",
+                "--ui-root",
+                "/ui",
                 "--n-shuffles",
                 "50",
                 "--workers",
@@ -44,6 +49,10 @@ class TestParseArguments:
                 "/emb/config",
                 "--genre-csv",
                 "/g.csv",
+                "--gunkel-csv",
+                "/gunkel.csv",
+                "--ui-root",
+                "/ui",
                 "--family",
                 "morphological/sp/1_2gram",
             ]
@@ -54,6 +63,14 @@ class TestParseArguments:
 
 class TestMain:
     def _argv(self, tmp_path: Path, *extra: str) -> list[str]:
+        part = (
+            tmp_path
+            / "emb"
+            / SCOPE.directory
+            / "domain=morphological/feature=sp/construction=1_2gram/part-0.parquet"
+        )
+        part.parent.mkdir(parents=True, exist_ok=True)
+        part.write_bytes(b"x")
         return [
             "--data-root",
             str(tmp_path / "data"),
@@ -63,6 +80,10 @@ class TestMain:
             str(tmp_path / "emb" / "config"),
             "--genre-csv",
             str(tmp_path / "g.csv"),
+            "--gunkel-csv",
+            str(tmp_path / "gunkel.csv"),
+            "--ui-root",
+            str(tmp_path / "ui"),
             "--n-shuffles",
             "5",
             *extra,
@@ -73,11 +94,12 @@ class TestMain:
 
         main(
             self._argv(tmp_path, "--family", "morphological/sp/1_2gram"),
-            controls={"parallelism": Control(lambda argv: None)},
+            controls={},
             runner=ran.append,
         )
 
-        assert [job.key for job in ran] == ["morphological/sp/1_2gram"]
+        assert {job.key for job in ran} == {"morphological/sp/1_2gram"}
+        assert len(ran) == 1 + len({taxonomy for taxonomy, _ in genre_registers()})
 
     def test_it_writes_nothing_and_runs_nothing_in_a_dry_run(self, tmp_path: Path) -> None:
         """A dry run is how an operator sees the size of a sweep before paying for it."""
@@ -85,7 +107,7 @@ class TestMain:
 
         main(
             self._argv(tmp_path, "--dry-run"),
-            controls={"parallelism": Control(lambda argv: None)},
+            controls={},
             runner=ran.append,
         )
 
@@ -99,7 +121,7 @@ class TestMain:
         with pytest.raises(SystemExit) as exit_info:
             main(
                 self._argv(tmp_path, "--family", "morphological/sp/1_2gram"),
-                controls={"parallelism": Control(lambda argv: None)},
+                controls={},
                 runner=_runner,
             )
 
@@ -111,7 +133,7 @@ class TestMain:
         with pytest.raises(SystemExit):
             main(
                 self._argv(tmp_path, "--family", "not/a/family"),
-                controls={"parallelism": Control(lambda argv: None)},
+                controls={},
                 runner=ran.append,
             )
 

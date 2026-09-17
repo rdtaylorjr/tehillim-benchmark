@@ -9,6 +9,7 @@ import scipy.sparse as sp
 from genre.bootstrap import block_bootstrap_genre_ap_gap_and_auc, psalm_similarity_matrix
 from genre.evaluate import evaluate_genre_discrimination_from_matrix
 from genre.pairs import GenrePair, filter_pairs_by_genre
+from genre.passages import Passage, admissible_mask, cluster_codes
 from genre.permutation import joint_psalm_label_permutation_test, one_vs_rest_masks
 from library.ap_gap_auc_bootstrap import ApGapAucCI
 from library.calibration import BackgroundStats, background_stats_from_matrix
@@ -18,24 +19,29 @@ from library.retrieval_metrics import sparse_cosine_similarity_matrix
 
 @dataclass(frozen=True, slots=True)
 class GenreRunConfig:
-    """The labels and resampling budget every model in one run is scored against."""
+    """The passages, pairs, and resampling budget every model in one run is scored against."""
 
-    genre_by_psalm: dict[int, str]
+    passages: list[Passage]
     genres: tuple[str, ...]
     pairs: list[GenrePair]
     n_permutations: int
     n_resamples: int
     seed: int
 
+    @property
+    def passage_by_id(self) -> dict[str, Passage]:
+        """Each passage by its id, for selecting the ones a model could score."""
+        return {passage.id: passage for passage in self.passages}
+
 
 def _bootstrap_ci_or_none(
-    psalm_ids: list[int],
+    psalm_ids: list[str],
     similarity_matrix: np.ndarray,
     same_mask: np.ndarray,
     population_mask: np.ndarray,
+    clusters: np.ndarray,
     background: BackgroundStats,
-    n_resamples: int,
-    seed: int,
+    config: GenreRunConfig,
     genre: str,
 ) -> ApGapAucCI | None:
     """None for a genre whose one-vs-rest population is too small to define a CI, not a crash."""
@@ -45,9 +51,10 @@ def _bootstrap_ci_or_none(
             similarity_matrix,
             same_mask,
             background,
-            n_resamples=n_resamples,
-            rng=np.random.default_rng(seed),
+            n_resamples=config.n_resamples,
+            rng=np.random.default_rng(config.seed),
             population_mask=population_mask,
+            clusters=clusters,
         )
     except InsufficientDataError as error:
         print(f"no bootstrap CI for genre {genre!r}: {error}", file=sys.stderr)
@@ -56,25 +63,28 @@ def _bootstrap_ci_or_none(
 
 def _compare_from_similarity_matrix(
     model: str,
-    psalm_ids: list[int],
+    psalm_ids: list[str],
     similarity_matrix: np.ndarray,
     config: GenreRunConfig,
 ) -> list[dict[str, str | int | float]]:
-    """Shared per-genre report step for both the dense and sparse psalm-vector entry points."""
+    """Shared per-genre report step for both the dense and sparse item-vector entry points."""
     genres = config.genres
+    passage_by_id = config.passage_by_id
+    scored = [passage_by_id[p] for p in psalm_ids]
+    admissible = admissible_mask(scored)
+    clusters = cluster_codes(scored)
     psalm_index = {p: i for i, p in enumerate(psalm_ids)}
     code_of = {genre: index for index, genre in enumerate(genres)}
-    genre_codes = np.array([code_of[config.genre_by_psalm[p]] for p in psalm_ids])
+    genre_codes = np.array([code_of[passage.gattung] for passage in scored])
     background = background_stats_from_matrix(similarity_matrix)
-
     perm_result = joint_psalm_label_permutation_test(
         similarity_matrix,
         genre_codes,
         genres,
         n_permutations=config.n_permutations,
         rng=np.random.default_rng(config.seed),
+        admissible=admissible,
     )
-
     rows: list[dict[str, str | int | float]] = []
     for index, genre in enumerate(genres):
         restricted = filter_pairs_by_genre(config.pairs, genre)
@@ -87,10 +97,10 @@ def _compare_from_similarity_matrix(
             psalm_ids,
             similarity_matrix,
             same_mask,
-            population_mask,
+            population_mask & admissible,
+            clusters,
             background,
-            config.n_resamples,
-            config.seed,
+            config,
             genre,
         )
 
@@ -118,8 +128,8 @@ def _compare_from_similarity_matrix(
 
 def compare_model_across_genres(
     model: str,
-    psalm_ids: list[int],
-    psalm_vectors: dict[int, np.ndarray],
+    psalm_ids: list[str],
+    psalm_vectors: dict[str, np.ndarray],
     config: GenreRunConfig,
 ) -> list[dict[str, str | int | float]]:
     """One row per genre: AP (point, unchanged), AUC, jackknife CIs, and three p-value sources."""
@@ -129,7 +139,7 @@ def compare_model_across_genres(
 
 def compare_model_across_genres_sparse(
     model: str,
-    psalm_ids: list[int],
+    psalm_ids: list[str],
     psalm_vectors: sp.csr_matrix,
     config: GenreRunConfig,
 ) -> list[dict[str, str | int | float]]:

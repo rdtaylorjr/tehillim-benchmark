@@ -17,7 +17,7 @@ def test_raises_a_clear_error_instead_of_crashing_when_only_one_psalm_survives_f
     similarity_matrix = np.array([[1.0]])
     genre_codes = np.array([0])
 
-    with pytest.raises(ValueError, match="at least 2 psalms"):
+    with pytest.raises(ValueError, match="at least 2 items"):
         joint_psalm_label_permutation_test(
             similarity_matrix, genre_codes, ("A",), rng=np.random.default_rng(0)
         )
@@ -240,7 +240,7 @@ def test_batched_separation_chunks_draws_without_changing_a_single_bit() -> None
 
 
 def test_batched_separation_peak_memory_does_not_grow_with_the_draw_count() -> None:
-    """All draws at once allocated two float64 arrays of draws by pairs."""
+    """Ten times the draws grows the peak by per-draw bookkeeping, never by draws times pairs."""
     import tracemalloc
 
     from genre.permutation import _batched_separation
@@ -258,9 +258,10 @@ def test_batched_separation_peak_memory_does_not_grow_with_the_draw_count() -> N
         tracemalloc.stop()
         return peak
 
-    small, large = peak_for(200), peak_for(2000)
+    small, large = peak_for(2000), peak_for(20000)
 
-    assert large < small * 3, f"peak grew from {small} to {large} with ten times the draws"
+    draws_by_pairs = 18000 * len(rows) * 8
+    assert large - small < draws_by_pairs / 10, f"peak grew from {small} to {large}"
 
 
 def test_one_vs_rest_auc_is_nan_when_a_genre_has_no_pair_on_one_side() -> None:
@@ -272,3 +273,26 @@ def test_one_vs_rest_auc_is_nan_when_a_genre_has_no_pair_on_one_side() -> None:
     population = np.array([True, True, True])
 
     assert np.isnan(_one_vs_rest_auc(sims, all_same, population))
+
+
+def test_an_admissible_mask_drops_the_pairs_it_excludes_from_every_draw() -> None:
+    """With the strong pairs masked out, the same labels no longer separate the genre."""
+    similarity_matrix, codes, genres = _strong_signal_fixture()
+    n = similarity_matrix.shape[0]
+    admissible = np.ones((n, n), dtype=bool)
+    np.fill_diagonal(admissible, val=False)
+    #: Mask every same-genre pair of the first genre, leaving it no positive pair at all.
+    first = np.flatnonzero(codes == 0)
+    admissible[np.ix_(first, first)] = False
+
+    result = joint_psalm_label_permutation_test(
+        similarity_matrix,
+        codes,
+        genres,
+        n_permutations=200,
+        rng=np.random.default_rng(0),
+        admissible=admissible,
+    )
+
+    assert np.isnan(result.observed[0])
+    assert not np.isnan(result.observed[1])

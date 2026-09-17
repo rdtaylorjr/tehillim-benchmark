@@ -1,7 +1,7 @@
 """Exports row-per-pair genre-pair detail plus a per-model AP/AUC/calibration summary."""
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -12,14 +12,15 @@ from core.parallel import map_in_order
 
 from genre.calibrated import compare_genre_calibrated, genre_calibrated_row
 from genre.evaluate import pair_similarities
-from genre.genre_labels import load_genre_by_psalm
 from genre.pairs import GenrePair, build_genre_pairs
-from library.bhsa import list_psalms_half_verses_by_psalm, load_bhsa_api
+from genre.passages import load_half_verse_weights, load_passages
+from library.bhsa import load_bhsa_api
 from library.calibration import BackgroundStats, background_similarity_stats, calibrated_z_score
+from library.centroid import Weights
 from library.cli import (
     add_embeddings_dir_argument,
-    add_genre_csv_argument,
     add_scoring_arguments,
+    add_taxonomy_arguments,
     report_reuse,
 )
 from library.frame_accumulator import FrameAccumulator
@@ -35,16 +36,18 @@ _OUTPUT_FILES = ("genre_pair_detail.parquet", "genre_summary.parquet")
 def build_pair_detail_rows(
     model: str,
     pairs: list[GenrePair],
-    psalm_vectors: dict[int, np.ndarray],
+    psalm_vectors: dict[str, np.ndarray],
     background: BackgroundStats,
 ) -> list[dict[str, Any]]:
-    """One row per usable pair: raw similarity, calibrated z, and a same_genre flag only."""
+    """One row per usable pair: passages and psalms, raw similarity, calibrated z, same_genre."""
     usable, similarities = pair_similarities(pairs, psalm_vectors)
     rows = []
     for pair, sim in zip(usable, similarities, strict=True):
         rows.append(
             {
                 "model": model,
+                "passage_a": pair.item_a,
+                "passage_b": pair.item_b,
                 "psalm_a": pair.psalm_a,
                 "psalm_b": pair.psalm_b,
                 "same_genre": pair.same_genre,
@@ -58,7 +61,7 @@ def build_pair_detail_rows(
 def build_summary_rows(
     model: str,
     pairs: list[GenrePair],
-    psalm_vectors: dict[int, np.ndarray],
+    psalm_vectors: dict[str, np.ndarray],
     background: BackgroundStats,
 ) -> list[dict[str, Any]]:
     """Single-row-per-model AP/AUC/calibration summary, wrapping compare_genre_calibrated."""
@@ -67,7 +70,7 @@ def build_summary_rows(
 
 def score_model(
     path: Path,
-    half_verses_by_psalm: dict[int, list[int]],
+    half_verses_by_psalm: Mapping[str, Weights],
     pairs: list[GenrePair],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """One model file's (pair rows, summary rows), scored independently of every other model."""
@@ -87,7 +90,7 @@ def main(
 ) -> None:
     """Parses the arguments this module documents, runs the batch, and writes its output."""
     parser = argparse.ArgumentParser(description=__doc__)
-    add_genre_csv_argument(parser)
+    add_taxonomy_arguments(parser)
     add_embeddings_dir_argument(parser)
     parser.add_argument("--output-dir", type=Path, required=True)
     add_scoring_arguments(parser)
@@ -95,9 +98,9 @@ def main(
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     api = api_factory(args.checkout)
-    genre_by_psalm = load_genre_by_psalm(args.genre_csv)
-    pairs = build_genre_pairs(genre_by_psalm)
-    half_verses_by_psalm = list_psalms_half_verses_by_psalm(api)
+    passages = load_passages(args.taxonomy, args.unit, args.labels_csv, api)
+    pairs = build_genre_pairs(passages)
+    half_verses_by_psalm = load_half_verse_weights(passages, api)
 
     (cached_pairs, cached_summaries), cached_models = load_cached_parquet_set(
         args.output_dir, _OUTPUT_FILES
@@ -108,7 +111,9 @@ def main(
     pair_rows = FrameAccumulator(cached_pairs)
     summary_rows = FrameAccumulator(cached_summaries)
     score = partial(score_model, half_verses_by_psalm=half_verses_by_psalm, pairs=pairs)
-    for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+    for scored in map_in_order(
+        skipping_unscorable(score), model_paths, args.workers, label="models"
+    ):
         if scored is None:
             continue
         model_pair_rows, model_summary_rows = scored

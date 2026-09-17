@@ -10,6 +10,8 @@ from library.bhsa import (
     bhsa_clone_location,
     list_psalms_half_verse_nodes,
     list_psalms_half_verses_by_psalm,
+    list_psalms_words_by_half_verse,
+    list_psalms_words_by_verse,
     load_bhsa_api,
     node_to_psalm_map,
     psalms_book_node,
@@ -83,11 +85,21 @@ class _FakeL:
 
 
 class _FakeT:
-    def __init__(self, chapter_to_psalm: dict[int, int]) -> None:
+    def __init__(
+        self, chapter_to_psalm: dict[int, int], verse_to_number: dict[int, int] | None = None
+    ) -> None:
         self._chapter_to_psalm = chapter_to_psalm
+        self._verse_to_number = verse_to_number or {}
 
-    def sectionFromNode(self, node: int) -> tuple[str, int]:  # noqa: N802
+    def sectionFromNode(self, node: int) -> tuple[str, int] | tuple[str, int, int]:  # noqa: N802
+        if node in self._verse_to_number:
+            chapter = next(c for c, verses in _VERSES_OF_CHAPTER.items() if node in verses)
+            return ("Psalmi", self._chapter_to_psalm[chapter], self._verse_to_number[node])
         return ("Psalmi", self._chapter_to_psalm[node])
+
+
+#: Verse nodes under each chapter node, for the verse-level fake.
+_VERSES_OF_CHAPTER = {10: [11, 12], 20: [21]}
 
 
 class _FakeApi:
@@ -103,9 +115,21 @@ def _api_with_two_psalms() -> _FakeApi:
         (1, "chapter"): [10, 20],
         (10, "half_verse"): [100, 101],
         (20, "half_verse"): [200],
+        (10, "verse"): [11, 12],
+        (20, "verse"): [21],
+        (11, "half_verse"): [100],
+        (12, "half_verse"): [101],
+        (21, "half_verse"): [200],
+        (11, "word"): [1001, 1002],
+        (12, "word"): [1011],
+        (21, "word"): [2001, 2002, 2003],
+        (100, "word"): [1001, 1002],
+        (101, "word"): [1011],
+        (200, "word"): [2001, 2002, 2003],
     }
     chapter_to_psalm = {10: 1, 20: 2}
-    return _FakeApi(_FakeF(book_names), _FakeL(children), _FakeT(chapter_to_psalm))
+    verse_to_number = {11: 1, 12: 2, 21: 1}
+    return _FakeApi(_FakeF(book_names), _FakeL(children), _FakeT(chapter_to_psalm, verse_to_number))
 
 
 class TestLoadBhsaApi:
@@ -281,6 +305,26 @@ class TestListPsalmsHalfVersesByPsalm:
         api = _api_with_two_psalms()
 
         assert list_psalms_half_verses_by_psalm(api) == {1: [100, 101], 2: [200]}
+
+
+class TestListPsalmsWords:
+    def test_keys_each_verses_words_by_psalm_and_verse_number_in_text_order(self) -> None:
+        api = _api_with_two_psalms()
+
+        assert list_psalms_words_by_verse(api) == {
+            (1, 1): [1001, 1002],
+            (1, 2): [1011],
+            (2, 1): [2001, 2002, 2003],
+        }
+
+    def test_lists_the_words_of_every_half_verse_in_canonical_order(self) -> None:
+        api = _api_with_two_psalms()
+
+        assert list_psalms_words_by_half_verse(api) == {
+            100: [1001, 1002],
+            101: [1011],
+            200: [2001, 2002, 2003],
+        }
 
 
 class TestNodeToPsalmMap:

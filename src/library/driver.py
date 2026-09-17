@@ -15,7 +15,7 @@ from core.driver import Cell, Plan, provenance_of, run_cell, write_run_manifest
 from core.provenance import code_hash
 
 from library.parity import check_parity
-from library.stages import BENCHMARK_ROOT, Roots, plan_cells
+from library.stages import BENCHMARK_ROOT, SHUFFLE_MODULE_SUFFIX, Roots, plan_cells
 
 BENCHMARK_SRC = Path(__file__).resolve().parents[1]
 EMBEDDINGS_SRC = Path(core.__file__).resolve().parents[1]
@@ -30,8 +30,7 @@ BENCHMARK_PACKAGES: tuple[str, ...] = (
 )
 #: A shuffle control draws through families.shuffle and its domain's vectorizers, so those count.
 SHUFFLE_PACKAGES: tuple[str, ...] = ("families",)
-SHUFFLE_MODULE_SUFFIX = ".shuffle_order_control"
-ROOT_KEYS = ("data_root", "embeddings_root", "config_root", "genre_csv", "ui_root")
+ROOT_KEYS = ("data_root", "embeddings_root", "config_root", "genre_csv", "gunkel_csv", "ui_root")
 
 
 def benchmark_code_hash(
@@ -68,6 +67,7 @@ def _roots_from_args(args: argparse.Namespace) -> Roots:
         embeddings_root=args.embeddings_root,
         config_root=args.config_root,
         genre_csv=args.genre_csv,
+        gunkel_csv=args.gunkel_csv,
         ui_root=args.ui_root,
         workers=args.workers,
     )

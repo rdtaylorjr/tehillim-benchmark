@@ -19,12 +19,30 @@ from library.protocol import (
 
 
 def add_genre_csv_argument(parser: argparse.ArgumentParser) -> None:
-    """The third-party genre CSV every genre script takes as its first positional."""
+    """The third-party genre CSV a whole-psalm script takes as its first positional."""
     parser.add_argument(
         "genre_csv",
         type=Path,
         help="third-party genre CSV, e.g. psalms-browser.csv (not in this repo)",
     )
+
+
+def add_taxonomy_arguments(parser: argparse.ArgumentParser, *, many_units: bool = False) -> None:
+    """The labels table, taxonomy, and unit register every genre script scores against."""
+    from genre.taxonomies import TAXONOMIES
+
+    parser.add_argument(
+        "labels_csv",
+        type=Path,
+        help="the taxonomy's table: psalms-browser.csv for logos, gunkel.csv for gunkel",
+    )
+    parser.add_argument("--taxonomy", required=True, choices=sorted(TAXONOMIES))
+    if many_units:
+        parser.add_argument(
+            "--unit", action="append", default=None, help="a unit register, once per output"
+        )
+    else:
+        parser.add_argument("--unit", default=None, help="the taxonomy's unit register, if any")
 
 
 def add_embeddings_dir_argument(parser: argparse.ArgumentParser) -> None:
@@ -48,11 +66,15 @@ def add_scoring_arguments(
     with_permutations: bool = False,
     with_group_permutations: bool = False,
     with_shuffles: bool = False,
+    many_outputs: bool = False,
 ) -> None:
     """Adds the options every batch script takes, so a changed default lands in one place."""
     parser.add_argument("--checkout", default=DEFAULT_CHECKOUT, help="BHSA checkout spec")
     add_workers_argument(parser)
-    parser.add_argument("--output", type=Path, default=None)
+    if many_outputs:
+        parser.add_argument("--output", type=Path, action="append", default=None)
+    else:
+        parser.add_argument("--output", type=Path, default=None)
     if with_seed:
         parser.add_argument("--seed", type=int, default=0)
     if with_resamples:

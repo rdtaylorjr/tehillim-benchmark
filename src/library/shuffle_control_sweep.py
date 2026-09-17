@@ -1,36 +1,29 @@
-"""Runs every registered family's order-shuffle control for every benchmark that lacks one."""
+"""Runs every planned order-shuffle control whose output is missing, sharing one loaded BHSA."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any
 
-from families.shuffle import dataset_source
+from core.driver import Cell
 
 import genre.scripts.shuffle_order_control as genre_control
 import parallelism.scripts.shuffle_order_control as parallelism_control
 from library.bhsa import load_bhsa_api
+from library.stages import SHUFFLE_MODULE_SUFFIX, Roots, plan_cells
 from parallelism.tf_features import load_api
 
 __all__ = [
     "CONTROLS",
-    "Control",
     "Job",
-    "control_filename",
     "pending_jobs",
     "run_job",
     "shared_api_factory",
     "sweep",
 ]
-
-#: A control's domain-level partition, which the committed tree already names.
-STAGE = "shuffle_control"
-
-#: Dropped from a control's filename, because the committed tree omits it.
-IMPLICIT_LEVEL = "phrase"
 
 
 def shared_api_factory(factory: Callable[[str], Any]) -> Callable[[str], Any]:
@@ -39,115 +32,61 @@ def shared_api_factory(factory: Callable[[str], Any]) -> Callable[[str], Any]:
     return lru_cache(maxsize=1)(factory)
 
 
-@dataclass(frozen=True, slots=True)
-class Control:
-    """One benchmark's order-shuffle control: how it is invoked and what it needs first."""
-
-    main: Any
-    #: Run parameters this benchmark takes as leading positionals, resolved by name at sweep time.
-    leading: tuple[str, ...] = ()
-
-
-CONTROLS: Mapping[str, Control] = {
-    "genre": Control(
-        partial(genre_control.main, api_factory=shared_api_factory(load_bhsa_api)),
-        leading=("genre_csv",),
+#: Each control script's main by module, bound to a loader the whole sweep shares.
+CONTROLS: Mapping[str, Callable[[list[str]], None]] = {
+    "genre.scripts.shuffle_order_control": partial(
+        genre_control.main, api_factory=shared_api_factory(load_bhsa_api)
     ),
-    "parallelism": Control(
-        partial(
-            parallelism_control.main,
-            api_factory=shared_api_factory(load_api),
-        )
+    "parallelism.scripts.shuffle_order_control": partial(
+        parallelism_control.main, api_factory=shared_api_factory(load_api)
     ),
 }
 
 
-def control_filename(key: str) -> str:
-    """The stem a family's control writes under, dropping the domain and the implicit level."""
-    return "_".join(part for part in key.split("/")[1:] if part != IMPLICIT_LEVEL)
-
-
 @dataclass(frozen=True, slots=True)
 class Job:
-    """One family scored under one benchmark, with every path it needs already resolved."""
+    """One planned control cell, with the family it scores read off its arguments."""
 
-    benchmark: str
-    key: str
-    real_embeddings: Path
-    output: Path
-    leading: tuple[str, ...] = field(default=())
+    cell: Cell
 
-    def argv(self, *, n_shuffles: int, workers: int, config_root: Path) -> list[str]:
-        """The command line the benchmark's own control script parses."""
-        return [
-            *self.leading,
-            str(self.real_embeddings),
-            "--family",
-            self.key,
-            "--config-root",
-            str(config_root),
-            "--n-shuffles",
-            str(n_shuffles),
-            "--workers",
-            str(workers),
-            "--output",
-            str(self.output),
-        ]
+    @property
+    def benchmark(self) -> str:
+        """The benchmark segment of the cell name."""
+        return self.cell.name.split(".")[0]
 
+    @property
+    def key(self) -> str:
+        """The family the control scores."""
+        args = self.cell.command_args
+        return args[args.index("--family") + 1]
 
-def _output_path(benchmark: str, key: str, data_root: Path) -> Path:
-    """Where a control result lands, under the partition the committed tree uses."""
-    return (
-        data_root
-        / "analysis=benchmark"
-        / f"benchmark={benchmark}"
-        / f"domain={key.split('/', maxsplit=1)[0]}"
-        / f"stage={STAGE}"
-        / f"{control_filename(key)}.csv"
-    )
+    @property
+    def outputs(self) -> tuple[Path, ...]:
+        """Where the control's results land, one per register it scores."""
+        return self.cell.outputs
+
+    def argv(self, *, n_shuffles: int) -> list[str]:
+        """The command line the control script parses, at the sweep's run size."""
+        return [*self.cell.command_args, "--n-shuffles", str(n_shuffles)]
 
 
-def pending_jobs(
-    controls: Mapping[str, Control],
-    keys: Iterable[str],
-    *,
-    data_root: Path,
-    embeddings_root: Path,
-    parameters: Mapping[str, Path] | None = None,
-) -> list[Job]:
-    """Every benchmark and family pairing whose result is not in the tree yet."""
-    supplied = parameters or {}
-    jobs = []
-    for benchmark, control in controls.items():
-        leading = tuple(str(supplied[name]) for name in control.leading)
-        for key in keys:
-            output = _output_path(benchmark, key, data_root)
-            if output.exists():
-                continue
-            jobs.append(
-                Job(
-                    benchmark=benchmark,
-                    key=key,
-                    real_embeddings=dataset_source(key, embeddings_root),
-                    output=output,
-                    leading=leading,
-                )
-            )
-    return jobs
+def pending_jobs(roots: Roots, keys: Iterable[str]) -> list[Job]:
+    """Every planned control for the named families whose result is not in the tree yet."""
+    wanted = set(keys)
+    return [
+        job
+        for job in (Job(cell) for cell in plan_cells(roots))
+        if job.cell.module.endswith(SHUFFLE_MODULE_SUFFIX)
+        and job.key in wanted
+        and not all(output.exists() for output in job.outputs)
+    ]
 
 
 def run_job(
-    job: Job,
-    *,
-    controls: Mapping[str, Control],
-    n_shuffles: int,
-    workers: int,
-    config_root: Path,
+    job: Job, *, controls: Mapping[str, Callable[[list[str]], None]], n_shuffles: int
 ) -> None:
-    """Invokes the control the job's benchmark declares, with the arguments that job resolved."""
-    controls[job.benchmark].main(
-        job.argv(n_shuffles=n_shuffles, workers=workers, config_root=config_root)
-    )
+    """Invokes the control the job's cell declares, with the arguments the plan resolved."""
+    controls[job.cell.module](job.argv(n_shuffles=n_shuffles))
 
 
 def sweep(jobs: Sequence[Job], *, runner: Callable[[Job], None]) -> list[tuple[str, BaseException]]:
@@ -155,7 +94,8 @@ def sweep(jobs: Sequence[Job], *, runner: Callable[[Job], None]) -> list[tuple[s
     failures: list[tuple[str, BaseException]] = []
     #: An interrupt is the operator ending the run, so only what a control raises is collected.
     for job in jobs:
-        job.output.parent.mkdir(parents=True, exist_ok=True)
+        for output in job.outputs:
+            output.parent.mkdir(parents=True, exist_ok=True)
         try:
             runner(job)
         except (Exception, SystemExit) as error:  # noqa: BLE001

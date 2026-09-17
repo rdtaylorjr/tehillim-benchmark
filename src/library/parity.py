@@ -8,24 +8,53 @@ import pandas as pd
 from core.datasets import dataset_identifier, discover_domains
 from core.skips import skipped_in_log
 
-from library.stages import BENCHMARK_ROOT, SCOPE, Roots, domain_datasets
-
-#: Each benchmark's coverage table, and the raw stage whose log explains any skipped dataset.
-MASTER_TABLES: dict[str, tuple[str, str]] = {
-    "parallelism": ("stage=master/model_metrics_overall.parquet", "retrieval"),
-    "genre": ("stage=master/genre_metrics_wide.parquet", "summary"),
-    "trajectory": ("stage=raw/trajectory_distances.parquet", "distances"),
-}
+from library.stages import (
+    BENCHMARK_ROOT,
+    SCOPE,
+    Roots,
+    domain_datasets,
+    genre_dir,
+    genre_registers,
+    register_name,
+)
 
 
 class ParityError(RuntimeError):
     """A benchmark table lacks a dataset with no recorded skip, or carries a stale one."""
 
 
-def master_models(roots: Roots, benchmark: str, domain: str) -> set[str]:
-    """The models one benchmark's coverage table holds for one domain, empty when absent."""
-    relative, _ = MASTER_TABLES[benchmark]
-    path = roots.data_root / BENCHMARK_ROOT / f"benchmark={benchmark}/domain={domain}" / relative
+def coverage_tables(roots: Roots, domain: str) -> list[tuple[str, Path, str]]:
+    """Each chain of one domain: its cell prefix, its coverage table, and its raw stage."""
+    benchmark = roots.data_root / BENCHMARK_ROOT
+    return [
+        (
+            f"parallelism.{domain}",
+            benchmark
+            / f"benchmark=parallelism/domain={domain}"
+            / "stage=master/model_metrics_overall.parquet",
+            "retrieval",
+        ),
+        *(
+            (
+                f"genre.{domain}.{register_name(taxonomy, unit)}",
+                genre_dir(roots, taxonomy, unit, domain)
+                / "stage=master/genre_metrics_wide.parquet",
+                "summary",
+            )
+            for taxonomy, unit in genre_registers()
+        ),
+        (
+            f"trajectory.{domain}",
+            benchmark
+            / f"benchmark=trajectory/domain={domain}"
+            / "stage=raw/trajectory_distances.parquet",
+            "distances",
+        ),
+    ]
+
+
+def master_models(path: Path) -> set[str]:
+    """The models one coverage table holds, empty when the table is absent."""
     if not path.exists():
         return set()
     return set(pd.read_parquet(path, columns=["model"])["model"].unique())
@@ -37,13 +66,12 @@ def check_parity(roots: Roots, log_root: Path) -> dict[str, dict[str, object]]:
     failures: list[str] = []
     for domain in discover_domains(roots.embeddings_root, SCOPE):
         datasets = {dataset_identifier(p) for p in domain_datasets(roots, domain)}
-        for benchmark, (_, raw_stage) in MASTER_TABLES.items():
-            scored = master_models(roots, benchmark, domain)
-            skipped = skipped_in_log(log_root / f"{benchmark}.{domain}.{raw_stage}.log")
+        for key, table, raw_stage in coverage_tables(roots, domain):
+            scored = master_models(table)
+            skipped = skipped_in_log(log_root / f"{key}.{raw_stage}.log")
             missing = datasets - scored
             unexplained = sorted(missing - skipped)
             stale = sorted(scored - datasets)
-            key = f"{benchmark}.{domain}"
             report[key] = {
                 "datasets": len(datasets),
                 "scored": len(scored & datasets),

@@ -1,13 +1,18 @@
-"""Builds every unordered psalm pair, labeled by whether the two psalms share a genre."""
+"""Builds every admissible unordered passage pair, labeled by whether the two share a genre."""
 
 from dataclasses import dataclass
-from itertools import combinations
+
+import numpy as np
+
+from genre.passages import Passage, admissible_mask
 
 
 @dataclass(frozen=True, slots=True)
 class GenrePair:
-    """Two psalms compared for genre discrimination, and whether they share a genre."""
+    """Two passages compared for genre discrimination, and whether they share a genre."""
 
+    item_a: str
+    item_b: str
     psalm_a: int
     psalm_b: int
     genre_a: str
@@ -15,14 +20,15 @@ class GenrePair:
     same_genre: bool
 
 
-def build_genre_pairs(genre_by_psalm: dict[int, str]) -> list[GenrePair]:
-    """One GenrePair per unordered psalm pair, psalm_a < psalm_b, same_genre from genre_by_psalm."""
-    psalms = sorted(genre_by_psalm)
-    pairs = []
-    for a, b in combinations(psalms, 2):
-        genre_a, genre_b = genre_by_psalm[a], genre_by_psalm[b]
-        pairs.append(GenrePair(a, b, genre_a, genre_b, same_genre=genre_a == genre_b))
-    return pairs
+def build_genre_pairs(passages: list[Passage]) -> list[GenrePair]:
+    """One GenrePair per unordered pair of passages sharing no half-verse, in the given order."""
+    rows, columns = np.nonzero(np.triu(admissible_mask(passages), k=1))
+    return [
+        GenrePair(
+            a.id, b.id, a.psalm, b.psalm, a.gattung, b.gattung, same_genre=a.gattung == b.gattung
+        )
+        for a, b in ((passages[i], passages[j]) for i, j in zip(rows, columns, strict=True))
+    ]
 
 
 def filter_pairs_by_genre(pairs: list[GenrePair], genre: str) -> list[GenrePair]:
