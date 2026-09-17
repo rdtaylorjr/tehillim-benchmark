@@ -7,6 +7,8 @@ from library.stages import (
     BENCHMARK_ROOT,
     SCOPE,
     Roots,
+    genre_registers,
+    genre_stage_dir,
     plan_cells,
     shuffle_families_for,
     stage_dir,
@@ -31,6 +33,7 @@ def roots(tmp_path: Path) -> Roots:
         embeddings_root=embeddings,
         config_root=tmp_path / "config",
         genre_csv=genre,
+        gunkel_csv=tmp_path / "gunkel.csv",
         ui_root=tmp_path / "ui",
         workers=2,
     )
@@ -50,9 +53,33 @@ class TestDiscoverDomains:
 
 class TestStageDir:
     def test_places_a_stage_under_the_benchmark_and_domain_partition(self, roots: Roots) -> None:
-        assert stage_dir(roots, "genre", "lexical", "raw") == (
-            roots.data_root / BENCHMARK_ROOT / "benchmark=genre/domain=lexical/stage=raw"
+        assert stage_dir(roots, "parallelism", "lexical", "raw") == (
+            roots.data_root / BENCHMARK_ROOT / "benchmark=parallelism/domain=lexical/stage=raw"
         )
+
+    def test_places_a_genre_stage_under_its_taxonomy_and_unit(self, roots: Roots) -> None:
+        assert genre_stage_dir(roots, "gunkel", "song_component", "lexical", "raw") == (
+            roots.data_root
+            / BENCHMARK_ROOT
+            / "benchmark=genre/taxonomy=gunkel/unit=song_component/domain=lexical/stage=raw"
+        )
+
+    def test_a_whole_psalm_taxonomy_has_no_unit_level(self, roots: Roots) -> None:
+        assert genre_stage_dir(roots, "logos", None, "lexical", "raw") == (
+            roots.data_root
+            / BENCHMARK_ROOT
+            / "benchmark=genre/taxonomy=logos/domain=lexical/stage=raw"
+        )
+
+
+class TestGenreRegisters:
+    def test_logos_whole_psalms_then_gunkels_three_widening_registers(self) -> None:
+        assert genre_registers() == [
+            ("logos", None),
+            ("gunkel", "song"),
+            ("gunkel", "song_component"),
+            ("gunkel", "song_component_motif"),
+        ]
 
 
 class TestShuffleFamilies:
@@ -86,7 +113,7 @@ class TestPlanCells:
         """A cell may read only what another cell writes or what the roots supply."""
         cells = plan_cells(roots)
         produced = {output for cell in cells for output in cell.outputs}
-        external = {roots.genre_csv}
+        external = {roots.genre_csv, roots.gunkel_csv}
         for cell in cells:
             for path in cell.inputs:
                 inside_tree = path.is_relative_to(roots.embeddings_root) or path.is_relative_to(
@@ -98,7 +125,11 @@ class TestPlanCells:
         names = {cell.name for cell in plan_cells(roots)}
         for domain in ("lexical", "syntactic"):
             assert f"parallelism.{domain}.master" in names
-            assert f"genre.{domain}.master" in names
+            assert f"genre.{domain}.logos.master" in names
+            assert f"genre.{domain}.logos.baseline" in names
+            for unit in ("song", "song_component", "song_component_motif"):
+                assert f"genre.{domain}.gunkel.{unit}.master" in names
+                assert f"genre.{domain}.gunkel.{unit}.baseline" in names
             assert f"trajectory.{domain}.ui_rows" in names
             assert f"ui.{domain}.payload" in names
             assert f"ui.{domain}.detail" in names
@@ -118,11 +149,41 @@ class TestPlanCells:
     def test_the_genre_master_reads_the_calibrated_scores(self, roots: Roots) -> None:
         """The master melts effect-size columns that only compare_calibrated writes."""
         cells = {cell.name: cell for cell in plan_cells(roots)}
-        master = cells["genre.lexical.master"]
-        raw = stage_dir(roots, "genre", "lexical", "raw")
+        master = cells["genre.lexical.logos.master"]
+        raw = genre_stage_dir(roots, "logos", None, "lexical", "raw")
         assert raw / "calibrated.csv" in master.inputs
         assert raw / "summary.csv" not in master.inputs
         assert master.command_args[:2] == ["--summary-csv", str(raw / "calibrated.csv")]
+
+    def test_a_genre_scoring_cell_names_its_taxonomy_unit_and_table(self, roots: Roots) -> None:
+        cells = {cell.name: cell for cell in plan_cells(roots)}
+        summary = cells["genre.lexical.gunkel.song_component.summary"]
+        assert summary.command_args[:5] == [
+            str(roots.gunkel_csv),
+            "--taxonomy",
+            "gunkel",
+            "--unit",
+            "song_component",
+        ]
+        assert roots.gunkel_csv in summary.inputs
+        logos = cells["genre.lexical.logos.summary"]
+        assert logos.command_args[:3] == [str(roots.genre_csv), "--taxonomy", "logos"]
+        assert "--unit" not in logos.command_args
+
+    def test_the_length_baseline_reads_only_the_taxonomys_table(self, roots: Roots) -> None:
+        cells = {cell.name: cell for cell in plan_cells(roots)}
+        baseline = cells["genre.lexical.gunkel.song.baseline"]
+        assert baseline.inputs == (roots.gunkel_csv,)
+        assert baseline.module == "genre.scripts.compare_baseline"
+        assert baseline.outputs == (
+            genre_stage_dir(roots, "gunkel", "song", "lexical", "raw") / "baseline.csv",
+        )
+
+    def test_the_interface_reads_the_logos_taxonomy(self, roots: Roots) -> None:
+        cells = {cell.name: cell for cell in plan_cells(roots)}
+        payload = cells["ui.lexical.payload"]
+        genre = genre_stage_dir(roots, "logos", None, "lexical", "master")
+        assert genre / "genre_metrics_wide.parquet" in payload.inputs
 
     def test_scoring_cells_read_every_dataset_of_their_domain(self, roots: Roots) -> None:
         """A changed dataset anywhere in the domain makes the domain's scoring stale."""
@@ -170,6 +231,7 @@ def test_the_declared_outputs_account_for_every_file_in_the_published_tree() -> 
         embeddings_root=embeddings_root,
         config_root=embeddings_root.parent / "config",
         genre_csv=Path("genre.csv"),
+        gunkel_csv=Path("gunkel.csv"),
         ui_root=Path("ui"),
         workers=1,
     )
@@ -182,3 +244,19 @@ def test_the_declared_outputs_account_for_every_file_in_the_published_tree() -> 
         if p.is_file() and p.name not in (".DS_Store", "_manifest.json")
     }
     assert on_disk <= declared, sorted(str(p) for p in on_disk - declared)[:10]
+
+
+class TestStagePriority:
+    def test_the_long_stages_come_first_and_the_light_ones_take_the_default(self) -> None:
+        from library.stages import stage_priority
+
+        assert stage_priority("by_genre") > stage_priority("gunkel.shuffle.sp_1_2gram")
+        assert stage_priority("gunkel.shuffle.sp_1_2gram") > stage_priority("summary")
+        assert stage_priority("baseline") == 0
+        assert stage_priority("master") == 0
+
+    def test_every_planned_cell_carries_its_stage_priority(self, roots: Roots) -> None:
+        from library.stages import plan_cells, stage_priority
+
+        for cell in plan_cells(roots):
+            assert cell.priority == stage_priority(cell.name.split(".", 2)[2])

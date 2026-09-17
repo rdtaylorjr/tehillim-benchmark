@@ -5,6 +5,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from genre.passages import Passage
+
 
 def _write_embeddings_parquet(path: Path, vectors: dict[int, list[float]]) -> Path:
     """Writes a dense tehillim-embeddings Parquet file, the shape load_embeddings expects."""
@@ -50,6 +52,23 @@ def _write_sparse_embeddings_parquet(
 
 #: The scope every benchmark reads: the Masoretic Psalms at the accentual half-verse.
 SCOPE_DIR = "corpus=bhsa/unit=half_verse"
+
+
+#: Every fake half-verse holds this many words, numbered from ten times its node.
+WORDS_PER_HALF_VERSE = 3
+
+
+def fake_words(half_verse: int) -> list[int]:
+    """The word nodes of a fake half-verse, in text order."""
+    return [half_verse * 10 + k for k in range(1, WORDS_PER_HALF_VERSE + 1)]
+
+
+def whole_psalm_passages(genre_by_psalm: dict[int, str]) -> list[Passage]:
+    """One whole-psalm passage per labelled psalm, its one half-verse node numbered as the psalm."""
+    return [
+        Passage(str(p), p, genre, tuple(fake_words(p)), f"Ps {p}")
+        for p, genre in sorted(genre_by_psalm.items())
+    ]
 
 
 def semantic_file(root: Path, model: str, name: str = "part-0.parquet") -> Path:
@@ -108,12 +127,17 @@ class _FakeL:
 
 
 class _FakeT:
-    """Text-Fabric's text namespace, which resolves a chapter node to its section."""
+    """Text-Fabric's text namespace, which resolves a chapter or verse node to its section."""
 
-    def __init__(self, chapter_to_psalm: dict[int, int]) -> None:
+    def __init__(
+        self, chapter_to_psalm: dict[int, int], verse_to_section: dict[int, tuple[int, int]]
+    ) -> None:
         self._chapter_to_psalm = chapter_to_psalm
+        self._verse_to_section = verse_to_section
 
-    def sectionFromNode(self, node: int) -> tuple[str, int]:  # noqa: N802
+    def sectionFromNode(self, node: int) -> tuple[str, int] | tuple[str, int, int]:  # noqa: N802
+        if node in self._verse_to_section:
+            return ("Psalmi", *self._verse_to_section[node])
         return ("Psalmi", self._chapter_to_psalm[node])
 
 
@@ -127,17 +151,25 @@ class _FakeApi:
 
 
 def _bhsa_api_over(half_verses_by_psalm: dict[int, list[int]]) -> _FakeApi:
-    """Builds a fake api whose Psalms book yields exactly the given half-verse nodes."""
+    """Builds a fake api whose Psalms book yields the given half-verse nodes, one per verse."""
     chapter_of = {psalm: 1000 + psalm for psalm in half_verses_by_psalm}
     children: dict[tuple[int, str], list[int]] = {
         (1, "chapter"): [chapter_of[psalm] for psalm in sorted(half_verses_by_psalm)]
     }
+    verse_to_section: dict[int, tuple[int, int]] = {}
     for psalm, nodes in half_verses_by_psalm.items():
         children[chapter_of[psalm], "half_verse"] = list(nodes)
+        verses = [100_000 + 100 * psalm + number for number in range(1, len(nodes) + 1)]
+        children[chapter_of[psalm], "verse"] = verses
+        for number, (verse, node) in enumerate(zip(verses, nodes, strict=True), start=1):
+            children[verse, "half_verse"] = [node]
+            children[verse, "word"] = fake_words(node)
+            children[node, "word"] = fake_words(node)
+            verse_to_section[verse] = (psalm, number)
     return _FakeApi(
         _FakeF({1: "Psalmi"}),
         _FakeL(children),
-        _FakeT({node: psalm for psalm, node in chapter_of.items()}),
+        _FakeT({node: psalm for psalm, node in chapter_of.items()}, verse_to_section),
     )
 
 

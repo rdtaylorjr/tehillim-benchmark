@@ -31,6 +31,7 @@ ENTRY_POINTS = _entry_point_modules()
 
 #: Reading the corpus is the one dependency a test cannot supply as a file, so it is injected.
 CORPUS_READING = {
+    "genre.scripts.compare_baseline",
     "genre.scripts.compare_by_genre",
     "genre.scripts.compare_calibrated",
     "genre.scripts.compare_models",

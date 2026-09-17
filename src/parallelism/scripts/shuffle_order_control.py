@@ -73,7 +73,9 @@ def built_null_scores(
 ) -> list[float]:
     """One AUC per seed, each draw built in memory and never written to a file."""
     seeds = list(range(1, n_shuffles + 1))
-    return map_in_order(partial(score_built_seed, draws, all_pairs), seeds, workers)
+    return map_in_order(
+        partial(score_built_seed, draws, all_pairs), seeds, workers, label="shuffles"
+    )
 
 
 def main(

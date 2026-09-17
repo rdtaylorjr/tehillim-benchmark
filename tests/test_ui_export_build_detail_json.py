@@ -4,33 +4,101 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from genre.passages import Passage
 from ui_export.scripts.build_detail_json import (
+    GenreMeta,
+    GenreSource,
     ModelDetailInputs,
     attach_genre_columns,
     build_domain,
     build_one_model,
     choose_primary_metric,
+    genre_sources,
     residualize_trajectory_metric,
     split_sections,
     table_model_sets,
+)
+
+LOGOS = GenreSource(
+    "logos",
+    None,
+    [
+        Passage("1", 1, "Hymn", (10,), "Ps 1"),
+        Passage("2", 2, "Hymn", (20,), "Ps 2"),
+        Passage("3", 3, "Lament", (30,), "Ps 3"),
+        Passage("4", 4, "Lament", (40,), "Ps 4"),
+    ],
+)
+GUNKEL_SONG = GenreSource(
+    "gunkel",
+    "song",
+    [
+        Passage("1:1.1-3.5:Hymnus", 1, "Hymnus", (10,), "Ps 1:1-3"),
+        Passage("2:1.1-4.2:Hymnus", 2, "Hymnus", (20,), "Ps 2:1-4"),
+        Passage("3:1.1-9.4:Klagelied", 3, "Klagelied", (30,), "Ps 3:1-9"),
+    ],
 )
 
 
 def _domain_json() -> dict:
     return {
         "parallelism_overall": [{"model": "a"}, {"model": "b"}],
-        "genre_overall": [{"model": "b"}, {"model": "b_psalm"}],
+        "genre_overall": [
+            {"model": "b", "taxonomy": "logos", "unit": None},
+            {"model": "b_psalm", "taxonomy": "logos", "unit": None},
+            {"model": "a", "taxonomy": "gunkel", "unit": "song"},
+        ],
         "trajectory": [{"model": "a"}, {"model": "c"}],
     }
 
 
 def test_table_model_sets_keeps_each_table_s_own_model_set_separate() -> None:
     """A psalm-level model excluded from parallelism_overall must not gain a parallelism section."""
-    sets = table_model_sets(_domain_json())
+    sets = table_model_sets(_domain_json(), [LOGOS, GUNKEL_SONG])
     assert sets["parallelism"] == {"a", "b"}
-    assert sets["genre"] == {"b", "b_psalm"}
+    assert sets["genre_logos"] == {"b", "b_psalm"}
+    assert sets["genre_gunkel_song"] == {"a"}
     assert sets["trajectory"] == {"a", "c"}
     assert "b_psalm" not in sets["parallelism"]
+
+
+def test_a_genre_source_names_its_section_and_knows_its_labels_and_items() -> None:
+    assert LOGOS.section == "genre_logos"
+    assert GUNKEL_SONG.section == "genre_gunkel_song"
+    assert GUNKEL_SONG.genres == ["Hymnus", "Klagelied"]
+    assert GUNKEL_SONG.genre_by_item == {
+        "1:1.1-3.5:Hymnus": "Hymnus",
+        "2:1.1-4.2:Hymnus": "Hymnus",
+        "3:1.1-9.4:Klagelied": "Klagelied",
+    }
+    assert GUNKEL_SONG.items["1:1.1-3.5:Hymnus"] == (1, "Ps 1:1-3")
+
+
+def test_genre_sources_reads_one_source_per_register(tmp_path: Path) -> None:
+    seen: list[tuple[str, str | None, Path]] = []
+
+    def _loader(taxonomy: str, unit: str | None, path: Path, api: object) -> list[Passage]:
+        seen.append((taxonomy, unit, path))
+        return LOGOS.passages
+
+    sources = genre_sources(
+        {"logos": tmp_path / "logos.csv", "gunkel": tmp_path / "gunkel.csv"},
+        object(),
+        loader=_loader,
+    )
+
+    assert [path.name for _, _, path in seen] == [
+        "logos.csv",
+        "gunkel.csv",
+        "gunkel.csv",
+        "gunkel.csv",
+    ]
+    assert [source.section for source in sources] == [
+        "genre_logos",
+        "genre_gunkel_song",
+        "genre_gunkel_song_component",
+        "genre_gunkel_song_component_motif",
+    ]
 
 
 def test_choose_primary_metric_picks_the_smallest_length_controlled_p() -> None:
@@ -196,24 +264,24 @@ def _genre_pair_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "psalm_a": 1,
-                "psalm_b": 2,
+                "item_a": "1",
+                "item_b": "2",
                 "genre_a": "Hymn",
                 "genre_b": "Hymn",
                 "same_genre": True,
                 "calibrated_z": 1.2,
             },
             {
-                "psalm_a": 3,
-                "psalm_b": 4,
+                "item_a": "3",
+                "item_b": "4",
                 "genre_a": "Lament",
                 "genre_b": "Lament",
                 "same_genre": True,
                 "calibrated_z": 0.8,
             },
             {
-                "psalm_a": 1,
-                "psalm_b": 3,
+                "item_a": "1",
+                "item_b": "3",
                 "genre_a": "Hymn",
                 "genre_b": "Lament",
                 "same_genre": False,
@@ -223,10 +291,18 @@ def _genre_pair_df() -> pd.DataFrame:
     )
 
 
+GENRE_META = {"genre_logos": GenreMeta(LOGOS.genres, LOGOS.items)}
+
+
 def _build(output_dir: Path, **overrides: object) -> list[str]:
     """Runs build_one_model with every section absent unless the test supplies it."""
     build_one_model(
-        "m", "syntactic", output_dir, ["Hymn", "Lament"], ModelDetailInputs(**overrides)
+        "m",
+        "syntactic",
+        output_dir,
+        ["Hymn", "Lament"],
+        GENRE_META,
+        ModelDetailInputs(**overrides),
     )
     return sorted(p.name for p in output_dir.glob("*.json"))
 
@@ -237,26 +313,29 @@ class TestBuildOneModel:
             tmp_path,
             pair_detail=_pair_detail_df(),
             baseline_detail=_baseline_detail_df(),
-            genre_pair=_genre_pair_df(),
+            genre_pair={"genre_logos": _genre_pair_df()},
         )
 
-        assert written == ["detail_syntactic_m_genre.json", "detail_syntactic_m_parallelism.json"]
+        assert written == [
+            "detail_syntactic_m_genre_logos.json",
+            "detail_syntactic_m_parallelism.json",
+        ]
 
     def test_omits_a_section_whose_frame_is_absent(self, tmp_path: Path) -> None:
-        written = _build(tmp_path, genre_pair=_genre_pair_df())
+        written = _build(tmp_path, genre_pair={"genre_logos": _genre_pair_df()})
 
-        assert written == ["detail_syntactic_m_genre.json"]
+        assert written == ["detail_syntactic_m_genre_logos.json"]
 
     def test_omits_a_section_whose_frame_is_empty(self, tmp_path: Path) -> None:
         """An empty frame reaches the builders as a real model with nothing to plot."""
         written = _build(
             tmp_path,
-            genre_pair=_genre_pair_df(),
+            genre_pair={"genre_logos": _genre_pair_df()},
             pair_detail=_pair_detail_df().iloc[0:0],
             baseline_detail=_baseline_detail_df(),
         )
 
-        assert written == ["detail_syntactic_m_genre.json"]
+        assert written == ["detail_syntactic_m_genre_logos.json"]
 
     def test_writes_nothing_when_no_section_has_data(self, tmp_path: Path) -> None:
         """A model in the tables but absent from every detail parquet is skipped silently."""
@@ -274,11 +353,11 @@ class TestBuildOneModel:
             tmp_path,
             pair_detail=_pair_detail_df(),
             baseline_detail=_baseline_detail_df(),
-            genre_pair=_genre_pair_df(),
+            genre_pair={"genre_logos": _genre_pair_df()},
         )
 
-        body = json.loads((tmp_path / "detail_syntactic_m_genre.json").read_text())
-        assert set(body) == {"model", "domain", "genre"}
+        body = json.loads((tmp_path / "detail_syntactic_m_genre_logos.json").read_text())
+        assert set(body) == {"model", "domain", "genre_logos"}
         assert body["model"] == "m"
         assert body["domain"] == "syntactic"
 
@@ -326,10 +405,17 @@ class TestBuildOneModelTrajectory:
 def _write_domain_tree(root: Path, domain: str) -> None:
     """A minimal tehillim-data tree: two models in the parallelism tables, one also in genre."""
     par = root / f"analysis=benchmark/benchmark=parallelism/domain={domain}/stage=detail"
-    gen = root / f"analysis=benchmark/benchmark=genre/domain={domain}/stage=detail"
+    gen = (
+        root / "analysis=benchmark/benchmark=genre/taxonomy=logos" / f"domain={domain}/stage=detail"
+    )
+    song = (
+        root
+        / "analysis=benchmark/benchmark=genre/taxonomy=gunkel/unit=song"
+        / f"domain={domain}/stage=detail"
+    )
     traj = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=raw"
     raw = root / f"analysis=benchmark/benchmark=trajectory/domain={domain}/stage=raw"
-    for d in (par, gen, traj, raw):
+    for d in (par, gen, song, traj, raw):
         d.mkdir(parents=True, exist_ok=True)
 
     pair_rows = [
@@ -343,13 +429,40 @@ def _write_domain_tree(root: Path, domain: str) -> None:
     ).to_parquet(par / "baseline_detail.parquet", index=False)
 
     # Only model "a" has genre detail, so only "a" can get a genre section.
+    pairs = [("1", "2", 1.2), ("3", "4", 0.8), ("1", "3", -0.3)]
     pd.DataFrame(
         [
-            {"model": "a", "psalm_a": 1, "psalm_b": 2, "same_genre": True, "calibrated_z": 1.2},
-            {"model": "a", "psalm_a": 3, "psalm_b": 4, "same_genre": True, "calibrated_z": 0.8},
-            {"model": "a", "psalm_a": 1, "psalm_b": 3, "same_genre": False, "calibrated_z": -0.3},
+            {
+                "model": "a",
+                "passage_a": a,
+                "passage_b": b,
+                "psalm_a": int(a),
+                "psalm_b": int(b),
+                "raw_similarity": z,
+                "calibrated_z": z,
+            }
+            for a, b, z in pairs
         ]
     ).to_parquet(gen / "genre_pair_detail.parquet", index=False)
+    song_pairs = [
+        ("1:1.1-3.5:Hymnus", "2:1.1-4.2:Hymnus", 1, 2, 0.9),
+        ("1:1.1-3.5:Hymnus", "3:1.1-9.4:Klagelied", 1, 3, -0.1),
+        ("2:1.1-4.2:Hymnus", "3:1.1-9.4:Klagelied", 2, 3, -0.2),
+    ]
+    pd.DataFrame(
+        [
+            {
+                "model": "a",
+                "passage_a": a,
+                "passage_b": b,
+                "psalm_a": pa,
+                "psalm_b": pb,
+                "raw_similarity": z,
+                "calibrated_z": z,
+            }
+            for a, b, pa, pb, z in song_pairs
+        ]
+    ).to_parquet(song / "genre_pair_detail.parquet", index=False)
 
     # All six pairs over four psalms, so both the same-genre and cross-genre sides are populated.
     pd.DataFrame(
@@ -387,9 +500,15 @@ def _write_domain_tree(root: Path, domain: str) -> None:
 def _domain_payload() -> dict[str, object]:
     return {
         "parallelism_overall": [{"model": "a"}, {"model": "b"}],
-        "genre_overall": [{"model": "a"}],
+        "genre_overall": [
+            {"model": "a", "taxonomy": "logos", "unit": None},
+            {"model": "a", "taxonomy": "gunkel", "unit": "song"},
+        ],
         "trajectory": [{"model": "a"}],
     }
+
+
+SOURCES = [LOGOS, GUNKEL_SONG]
 
 
 class TestBuildDomain:
@@ -402,6 +521,7 @@ class TestBuildDomain:
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            SOURCES,
             {1: 10, 2: 12, 3: 8, 4: 9},
             output_dir,
             max_workers=1,
@@ -409,7 +529,8 @@ class TestBuildDomain:
 
         names = sorted(p.name for p in output_dir.glob("*.json"))
         expected = [
-            "detail_syntactic_a_genre.json",
+            "detail_syntactic_a_genre_gunkel_song.json",
+            "detail_syntactic_a_genre_logos.json",
             "detail_syntactic_a_parallelism.json",
             "detail_syntactic_a_trajectory.json",
             "detail_syntactic_b_parallelism.json",
@@ -433,6 +554,7 @@ class TestBuildDomain:
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            SOURCES,
             {1: 10, 2: 12, 3: 8, 4: 9},
             output_dir,
             max_workers=1,
@@ -451,12 +573,13 @@ class TestBuildDomain:
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            SOURCES,
             {1: 10, 2: 12, 3: 8, 4: 9},
             output_dir,
             max_workers=1,
         )
 
-        assert not (output_dir / "detail_syntactic_b_genre.json").exists()
+        assert not (output_dir / "detail_syntactic_b_genre_logos.json").exists()
 
     def test_a_missing_optional_genre_parquet_leaves_every_other_section_intact(
         self, tmp_path: Path
@@ -465,7 +588,8 @@ class TestBuildDomain:
         _write_domain_tree(data_dir, "syntactic")
         (
             data_dir
-            / "analysis=benchmark/benchmark=genre/domain=syntactic/stage=detail"
+            / "analysis=benchmark/benchmark=genre/taxonomy=logos"
+            / "domain=syntactic/stage=detail"
             / "genre_pair_detail.parquet"
         ).unlink()
 
@@ -474,14 +598,45 @@ class TestBuildDomain:
             data_dir,
             _domain_payload(),
             {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            SOURCES,
             {1: 10, 2: 12, 3: 8, 4: 9},
             output_dir,
             max_workers=1,
         )
 
         names = sorted(p.name for p in output_dir.glob("*.json"))
-        assert "detail_syntactic_a_genre.json" not in names
+        assert "detail_syntactic_a_genre_logos.json" not in names
+        assert "detail_syntactic_a_genre_gunkel_song.json" in names
         assert "detail_syntactic_a_parallelism.json" in names
+
+    def test_a_gunkel_section_names_its_passages(self, tmp_path: Path) -> None:
+        data_dir, output_dir = tmp_path / "data", tmp_path / "out"
+        _write_domain_tree(data_dir, "syntactic")
+
+        build_domain(
+            "syntactic",
+            data_dir,
+            _domain_payload(),
+            {1: "Hymn", 2: "Hymn", 3: "Lament", 4: "Lament"},
+            SOURCES,
+            {1: 10, 2: 12, 3: 8, 4: 9},
+            output_dir,
+            max_workers=1,
+        )
+
+        body = json.loads((output_dir / "detail_syntactic_a_genre_gunkel_song.json").read_text())
+        section = body["genre_gunkel_song"]
+        assert [e["label"] for e in section["genre_order"]] == ["Ps 1:1-3", "Ps 2:1-4", "Ps 3:1-9"]
+        assert section["heatmap"][0] == {
+            "item_a": "1:1.1-3.5:Hymnus",
+            "item_b": "2:1.1-4.2:Hymnus",
+            "value": 0.9,
+        }
+        assert {g["key"] for g in section["raincloud_groups"]} == {
+            "different",
+            "combined",
+            "Hymnus",
+        }
 
 
 def test_a_task_names_itself_by_its_model_for_the_skip_report() -> None:
@@ -493,6 +648,7 @@ def test_a_task_names_itself_by_its_model_for_the_skip_report() -> None:
         domain="semantic",
         output_dir=Path("out"),
         genres=["Hymn"],
+        genre_meta={},
         inputs=None,
     )
 

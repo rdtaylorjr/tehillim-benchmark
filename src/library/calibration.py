@@ -52,6 +52,13 @@ def calibrated_z_score(value: float, background: BackgroundStats) -> float:
     return (value - background.mean) / background.std
 
 
+def calibrated_z_scores(values: np.ndarray, background: BackgroundStats) -> np.ndarray:
+    """calibrated_z_score over an array of observations at once."""
+    if background.std == 0:
+        raise DegenerateVectorError("background has zero variance; this model cannot be calibrated")
+    return (np.asarray(values, dtype=np.float64) - background.mean) / background.std
+
+
 def calibrated_effect_size(group_mean: float, background: BackgroundStats) -> float:
     """Cohen's-d-style standardized distance of a group's mean similarity from the background."""
     return calibrated_z_score(group_mean, background)

@@ -32,6 +32,7 @@ def _planned_modules(tmp_path: Path) -> set[str]:
         embeddings_root=embeddings,
         config_root=tmp_path / "c",
         genre_csv=tmp_path / "g.csv",
+        gunkel_csv=tmp_path / "gunkel.csv",
         ui_root=tmp_path / "u",
         workers=1,
     )

@@ -3,25 +3,26 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import semantic_file
+from conftest import semantic_file, whole_psalm_passages
 
 from genre.pairs import GenrePair, build_genre_pairs
 from genre.scripts.export_detail import build_pair_detail_rows, build_summary_rows, score_model
 from library.calibration import BackgroundStats
+from library.centroid import uniform_weights
 from library.errors import BenchmarkDataError
 from library.scoring import skipping_unscorable
 
 
-def _pairs_and_vectors() -> tuple[list[GenrePair], dict[int, np.ndarray]]:
+def _pairs_and_vectors() -> tuple[list[GenrePair], dict[str, np.ndarray]]:
     pairs = [
-        GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-        GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+        GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "3", 2, 3, "Lament", "Praise", same_genre=False),
     ]
     psalm_vectors = {
-        1: np.array([1.0, 0.0]),
-        2: np.array([0.9, 0.1]),
-        3: np.array([0.0, 1.0]),
+        "1": np.array([1.0, 0.0]),
+        "2": np.array([0.9, 0.1]),
+        "3": np.array([0.0, 1.0]),
     }
     return pairs, psalm_vectors
 
@@ -43,7 +44,7 @@ def test_build_pair_detail_rows_has_one_row_per_usable_pair() -> None:
 
 def test_build_pair_detail_rows_skips_a_pair_with_a_missing_vector() -> None:
     pairs, psalm_vectors = _pairs_and_vectors()
-    del psalm_vectors[3]
+    del psalm_vectors["3"]
     background = BackgroundStats(mean=0.5, std=0.2, n_vectors=2)
 
     rows = build_pair_detail_rows("model_a", pairs, psalm_vectors, background)
@@ -75,9 +76,11 @@ def test_score_model_returns_pair_and_summary_rows_for_one_file(
         semantic_file(tmp_path, "mine", "v.parquet"),
         {1: [1.0, 0.0], 2: [0.9, 0.1], 3: [0.0, 1.0], 4: [0.1, 0.9]},
     )
-    pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
+    pairs = build_genre_pairs(whole_psalm_passages({1: "A", 2: "A", 3: "B", 4: "B"}))
 
-    pair_rows, summary_rows = score_model(path, {p: [p] for p in (1, 2, 3, 4)}, pairs)
+    pair_rows, summary_rows = score_model(
+        path, uniform_weights({str(p): [p] for p in (1, 2, 3, 4)}), pairs
+    )
 
     assert len(pair_rows) == len(pairs)
     assert {row["model"] for row in pair_rows} == {"mine_consonantal"}
@@ -93,9 +96,13 @@ def test_score_model_raises_and_the_shared_policy_skips_it(
         semantic_file(tmp_path, "flat", "v.parquet"),
         {1: [1.0, 0.0], 2: [1.0, 0.0], 3: [1.0, 0.0], 4: [1.0, 0.0]},
     )
-    pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
+    pairs = build_genre_pairs(whole_psalm_passages({1: "A", 2: "A", 3: "B", 4: "B"}))
 
-    score = partial(score_model, half_verses_by_psalm={p: [p] for p in (1, 2, 3, 4)}, pairs=pairs)
+    score = partial(
+        score_model,
+        half_verses_by_psalm=uniform_weights({str(p): [p] for p in (1, 2, 3, 4)}),
+        pairs=pairs,
+    )
 
     with pytest.raises(BenchmarkDataError):
         score(path)

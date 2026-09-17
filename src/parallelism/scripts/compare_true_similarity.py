@@ -89,7 +89,7 @@ def compare_true_similarity(
 ) -> list[dict[str, str | int | float]]:
     """Scores every model file across workers, rows sorted by calibrated effect size descending."""
     score = partial(score_model, pairs=pairs, background_node_ids=background_node_ids)
-    scored = map_in_order(skipping_unscorable(score), model_paths, max_workers)
+    scored = map_in_order(skipping_unscorable(score), model_paths, max_workers, label="models")
     rows = [row for row in scored if row is not None]
     rows.sort(key=lambda r: r["calibrated_effect_size"], reverse=True)
     return rows

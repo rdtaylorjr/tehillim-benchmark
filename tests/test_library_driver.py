@@ -15,12 +15,14 @@ class TestRootsFromConfig:
                 "embeddings_root": str(tmp_path / "e"),
                 "config_root": str(tmp_path / "c"),
                 "genre_csv": str(tmp_path / "g.csv"),
+                "gunkel_csv": str(tmp_path / "gunkel.csv"),
                 "ui_root": str(tmp_path / "u"),
             },
             default_workers=3,
         )
         assert roots.workers == 3
         assert roots.genre_csv == tmp_path / "g.csv"
+        assert roots.gunkel_csv == tmp_path / "gunkel.csv"
 
     def test_a_missing_root_is_a_usage_error(self, tmp_path: Path) -> None:
         with pytest.raises(KeyError, match="embeddings_root"):

@@ -16,6 +16,7 @@ from library.fast_metrics import fast_auc, fast_average_precision
 MIN_PER_SIDE = 2
 
 Split = tuple[np.ndarray, np.ndarray]
+Statistics = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,15 +140,28 @@ def bootstrap_ap_gap_and_auc(
         for split in resamples
         if has_enough_per_side(split)
     ]
-    if not valid:
-        return _nan_result(point, prevalence)
+    columns = np.array(valid, dtype=float).reshape(len(valid), 3)
+    resampled: Statistics = (columns[:, 0], columns[:, 1], columns[:, 2])
+    return bootstrap_ci_from_statistics(
+        point, prevalence, resampled, jackknife_statistics(jackknife, background)
+    )
 
-    ap_arr, gap_arr, auc_arr = (np.array(column) for column in zip(*valid, strict=True))
+
+def bootstrap_ci_from_statistics(
+    point: tuple[float, float, float],
+    prevalence: float,
+    resampled: Statistics,
+    jackknife: Statistics,
+) -> ApGapAucCI:
+    """BCa 95% CI from the valid resamples and the jackknife statistics, NaN where unscorable."""
+    ap_arr, gap_arr, auc_arr = resampled
+    if len(ap_arr) == 0:
+        return _nan_result(point, prevalence)
     ap_low_pct, ap_high_pct = np.percentile(ap_arr, [2.5, 97.5])
     gap_low_pct, gap_high_pct = np.percentile(gap_arr, [2.5, 97.5])
     auc_low_pct, auc_high_pct = np.percentile(auc_arr, [2.5, 97.5])
 
-    jack_aps, jack_gaps, jack_aucs = jackknife_statistics(jackknife, background)
+    jack_aps, jack_gaps, jack_aucs = jackknife
     ap_low, ap_high = bca_ci(point[0], ap_arr, jack_aps)
     gap_low, gap_high = bca_ci(point[1], gap_arr, jack_gaps)
     auc_low, auc_high = bca_ci(point[2], auc_arr, jack_aucs)
@@ -169,7 +183,7 @@ def bootstrap_ap_gap_and_auc(
         auc_ci_low_pct=float(auc_low_pct),
         auc_ci_high_pct=float(auc_high_pct),
         prevalence=prevalence,
-        n_valid_resamples=len(valid),
+        n_valid_resamples=len(ap_arr),
         n_valid_jackknife=int(np.sum(~np.isnan(jack_aps))),
     )
 

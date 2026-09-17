@@ -141,7 +141,9 @@ def main(
         n_resamples=args.n_resamples,
         seed=args.seed,
     )
-    for model_rows in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+    for model_rows in map_in_order(
+        skipping_unscorable(score), model_paths, args.workers, label="models"
+    ):
         if model_rows is None:
             continue
         rows.extend(model_rows)

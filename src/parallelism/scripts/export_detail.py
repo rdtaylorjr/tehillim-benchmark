@@ -356,7 +356,9 @@ def main(
         baseline_pairs_raw=baseline_pairs_raw,
         background_node_ids=background_node_ids,
     )
-    for scored in map_in_order(skipping_unscorable(score), model_paths, args.workers):
+    for scored in map_in_order(
+        skipping_unscorable(score), model_paths, args.workers, label="models"
+    ):
         if scored is None:
             continue
         model_pairs, model_baselines, model_scopes = scored

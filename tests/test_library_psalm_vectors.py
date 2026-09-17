@@ -4,8 +4,10 @@ from typing import ClassVar
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import scipy.sparse as sp
 from conftest import _write_embeddings_parquet
 
+from library.centroid import uniform_weights
 from library.psalm_vectors import draw_psalm_vectors, is_sparse_embeddings, load_psalm_vectors
 
 
@@ -44,7 +46,7 @@ def test_load_psalm_vectors_pools_a_dense_file(tmp_path: Path) -> None:
     path = tmp_path / "d.parquet"
     _write_embeddings_parquet(path, VECTORS)
 
-    centroids = load_psalm_vectors(path, HALF_VERSES)
+    centroids = load_psalm_vectors(path, uniform_weights(HALF_VERSES))
 
     assert sorted(centroids) == [1, 2]
     assert np.allclose(centroids[1], [2.0, 0.0, 1.0])
@@ -56,8 +58,8 @@ def test_load_psalm_vectors_pools_a_sparse_file_to_the_same_centroids(tmp_path: 
     _write_embeddings_parquet(dense, VECTORS)
     _sparse(sparse, VECTORS, dim=3)
 
-    from_dense = load_psalm_vectors(dense, HALF_VERSES)
-    from_sparse = load_psalm_vectors(sparse, HALF_VERSES)
+    from_dense = load_psalm_vectors(dense, uniform_weights(HALF_VERSES))
+    from_sparse = load_psalm_vectors(sparse, uniform_weights(HALF_VERSES))
 
     assert sorted(from_dense) == sorted(from_sparse)
     for psalm in from_dense:
@@ -68,7 +70,7 @@ def test_load_psalm_vectors_skips_a_psalm_missing_one_of_its_half_verses(tmp_pat
     path = tmp_path / "s.parquet"
     _sparse(path, VECTORS, dim=3)
 
-    centroids = load_psalm_vectors(path, {1: [10, 11], 3: [10, 999]})
+    centroids = load_psalm_vectors(path, uniform_weights({1: [10, 11], 3: [10, 999]}))
 
     assert sorted(centroids) == [1]
 
@@ -91,8 +93,8 @@ def test_draw_psalm_vectors_pools_a_dense_draw_as_its_written_file_pools(tmp_pat
     path = tmp_path / "d.parquet"
     _write_embeddings_parquet(path, VECTORS)
 
-    built = draw_psalm_vectors(_dense_draw(VECTORS), None, HALF_VERSES)
-    from_file = load_psalm_vectors(path, HALF_VERSES)
+    built = draw_psalm_vectors(_dense_draw(VECTORS), None, uniform_weights(HALF_VERSES))
+    from_file = load_psalm_vectors(path, uniform_weights(HALF_VERSES))
 
     assert sorted(built) == sorted(from_file)
     assert all(np.array_equal(built[psalm], from_file[psalm]) for psalm in from_file)
@@ -102,8 +104,8 @@ def test_draw_psalm_vectors_pools_a_sparse_draw_as_its_written_file_pools(tmp_pa
     path = tmp_path / "s.parquet"
     _sparse(path, VECTORS, dim=3)
 
-    built = draw_psalm_vectors(_sparse_draw(VECTORS), 3, HALF_VERSES)
-    from_file = load_psalm_vectors(path, HALF_VERSES)
+    built = draw_psalm_vectors(_sparse_draw(VECTORS), 3, uniform_weights(HALF_VERSES))
+    from_file = load_psalm_vectors(path, uniform_weights(HALF_VERSES))
 
     assert sorted(built) == sorted(from_file)
     assert all(np.array_equal(built[psalm], from_file[psalm]) for psalm in from_file)
@@ -115,8 +117,10 @@ def test_draw_psalm_vectors_keeps_a_zero_norm_vector_the_reader_keeps(tmp_path: 
     path = tmp_path / "d.parquet"
     _write_embeddings_parquet(path, vectors)
 
-    built = draw_psalm_vectors(_dense_draw(vectors), None, {1: [10, 11, 12], 2: [20]})
-    from_file = load_psalm_vectors(path, {1: [10, 11, 12], 2: [20]})
+    built = draw_psalm_vectors(
+        _dense_draw(vectors), None, uniform_weights({1: [10, 11, 12], 2: [20]})
+    )
+    from_file = load_psalm_vectors(path, uniform_weights({1: [10, 11, 12], 2: [20]}))
 
     assert 1 in from_file
     assert sorted(built) == sorted(from_file)
@@ -141,7 +145,7 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         path = tmp_path / "e.parquet"
         _write_embeddings_parquet(path, self.NODE_VECTORS)
 
-        centroids = load_psalm_vectors(path, self.BY_PSALM)
+        centroids = load_psalm_vectors(path, uniform_weights(self.BY_PSALM))
 
         assert 1 in centroids
 
@@ -150,7 +154,7 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         path = tmp_path / "e.parquet"
         _write_embeddings_parquet(path, self.NODE_VECTORS)
 
-        centroids = load_psalm_vectors(path, self.BY_PSALM)
+        centroids = load_psalm_vectors(path, uniform_weights(self.BY_PSALM))
 
         np.testing.assert_allclose(centroids[1], [1.0, 0.0])
 
@@ -159,7 +163,7 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         path = tmp_path / "e.parquet"
         _write_embeddings_parquet(path, self.NODE_VECTORS)
 
-        centroids = load_psalm_vectors(path, self.BY_PSALM)
+        centroids = load_psalm_vectors(path, uniform_weights(self.BY_PSALM))
 
         assert 3 not in centroids
 
@@ -168,7 +172,7 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         path = tmp_path / "e.parquet"
         _write_embeddings_parquet(path, self.NODE_VECTORS)
 
-        centroids = load_psalm_vectors(path, self.BY_PSALM)
+        centroids = load_psalm_vectors(path, uniform_weights(self.BY_PSALM))
 
         np.testing.assert_allclose(centroids[2], [1.0, 1.0])
 
@@ -178,8 +182,8 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         _write_embeddings_parquet(dense, self.NODE_VECTORS)
         _sparse(sparse, self.NODE_VECTORS, dim=2)
 
-        from_dense = load_psalm_vectors(dense, self.BY_PSALM)
-        from_sparse = load_psalm_vectors(sparse, self.BY_PSALM)
+        from_dense = load_psalm_vectors(dense, uniform_weights(self.BY_PSALM))
+        from_sparse = load_psalm_vectors(sparse, uniform_weights(self.BY_PSALM))
 
         assert sorted(from_dense) == sorted(from_sparse)
         for psalm in from_dense:
@@ -191,9 +195,24 @@ class TestAnEmptyHalfVerseIsAValueNotMissingData:
         _write_embeddings_parquet(path, self.NODE_VECTORS)
         vectors = {node: np.array(v, dtype="<f4") for node, v in self.NODE_VECTORS.items()}
 
-        real = load_psalm_vectors(path, self.BY_PSALM)
-        drawn = draw_psalm_vectors(vectors, None, self.BY_PSALM)
+        real = load_psalm_vectors(path, uniform_weights(self.BY_PSALM))
+        drawn = draw_psalm_vectors(vectors, None, uniform_weights(self.BY_PSALM))
 
         assert sorted(real) == sorted(drawn)
         for psalm in real:
             np.testing.assert_allclose(real[psalm], drawn[psalm])
+
+
+def test_sparse_item_vectors_keep_the_centroids_sparse_in_sorted_order_without_zero_rows() -> None:
+    from library.psalm_vectors import sparse_item_vectors
+
+    node_ids = [10, 11, 12, 13]
+    rows = sp.csr_matrix(
+        np.array([[1.0, 0.0, 2.0], [0.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 0.0]])
+    )
+    half_verses = uniform_weights({"b": [12], "a": [10, 11], "empty": [13]})
+    ids, centroids = sparse_item_vectors(node_ids, rows, half_verses)
+
+    assert ids == ["a", "b"]
+    assert sp.issparse(centroids)
+    np.testing.assert_allclose(centroids.toarray(), [[0.5, 0.0, 1.0], [0.0, 3.0, 0.0]])

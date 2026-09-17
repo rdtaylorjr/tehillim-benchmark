@@ -17,6 +17,7 @@ from lexical.positional import positional_icf_vectors
 from lexical.psalm_zoning import psalm_position_mean_vectors
 
 from genre.scripts import build_master_report as genre_build_master_report
+from genre.scripts import compare_baseline as genre_compare_baseline
 from genre.scripts import compare_by_genre as genre_compare_by_genre
 from genre.scripts import compare_calibrated
 from genre.scripts import compare_models as genre_compare_models
@@ -36,6 +37,9 @@ from trajectory.scripts import validate_against_genre as trajectory_validate_aga
 
 N_SHUFFLE_DRAWS = 40
 
+#: Every genre script scores one taxonomy at one register; the fixture is Logos, whole psalms.
+LOGOS = ("--taxonomy", "logos")
+
 #: Three psalms a genre, so leaving one out still leaves a genre a within-genre pair to score.
 GENRES = {1: "lament", 2: "lament", 3: "lament", 4: "praise", 5: "praise", 6: "praise"}
 #: Four half-verses a psalm: the first two are an annotated couplet, the rest are background.
@@ -51,6 +55,34 @@ def genre_csv(tmp_path: Path) -> Path:
         writer.writeheader()
         for psalm, genre in GENRES.items():
             writer.writerow({"Psalm": f"Ps {psalm}", "Genre": genre})
+    return path
+
+
+#: The fake corpus gives each psalm one verse per half-verse of three words, so runs are word runs.
+GUNKEL_COLUMNS = (
+    "1933,1926,psalm,first_verse,first_word,first_halbzeile,last_verse,last_word,last_halbzeile,"
+    "gattung,gattung_en,unit,unit_en,Gunkel,Begrich"
+)
+GUNKEL_HEADER = f"{GUNKEL_COLUMNS},citations"
+GUNKEL_ROWS = [
+    "1933,1926,1,1,1,,4,3,,Hymnus,Hymn,Lied,Song,Gunkel,,p. 1",
+    "1933,,1,2,1,,2,3,,Fluch,Curse,Motiv,Motif,,Begrich,p. 2",
+    "1933,1926,2,1,1,,4,3,,Hymnus,Hymn,Lied,Song,Gunkel,,p. 3",
+    "1933,1926,3,1,1,,2,3,,Klagelied des Einzelnen,Individual Lament,Stück,Component,Gunkel,,p. 4",
+    "1933,1926,3,3,1,,4,3,,Hymnus,Hymn,Stück,Component,Gunkel,,p. 5",
+    "1933,1926,4,1,1,,4,3,,Klagelied des Einzelnen,Individual Lament,Lied,Song,Gunkel,,p. 6",
+    "1933,,4,4,1,,4,3,,Fluch,Curse,Motiv,Motif,,Begrich,p. 7",
+    "1933,1926,5,1,1,,4,3,,Klagelied des Einzelnen,Individual Lament,Lied,Song,Gunkel,,p. 8",
+    "1933,1926,6,1,1,,4,3,,Hymnus,Hymn,Lied,Song,Gunkel,,p. 9",
+]
+GUNKEL = ("--taxonomy", "gunkel", "--unit", "song_component_motif")
+
+
+@pytest.fixture
+def gunkel_csv(tmp_path: Path) -> Path:
+    """A tehillim-gunkel gunkel.csv with songs, components, and motifs over the fixture psalms."""
+    path = tmp_path / "gunkel.csv"
+    path.write_text("\n".join([GUNKEL_HEADER, *GUNKEL_ROWS]) + "\n")
     return path
 
 
@@ -77,7 +109,15 @@ class TestGenreCompareModels:
         output = tmp_path / "summary.csv"
 
         genre_compare_models.main(
-            [str(genre_csv), str(embeddings_dir), "--output", str(output), "--workers", "1"],
+            [
+                str(genre_csv),
+                *LOGOS,
+                str(embeddings_dir),
+                "--output",
+                str(output),
+                "--workers",
+                "1",
+            ],
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
@@ -89,7 +129,15 @@ class TestGenreCompareModels:
         output = tmp_path / "summary.csv"
 
         genre_compare_models.main(
-            [str(genre_csv), str(embeddings_dir), "--output", str(output), "--workers", "1"],
+            [
+                str(genre_csv),
+                *LOGOS,
+                str(embeddings_dir),
+                "--output",
+                str(output),
+                "--workers",
+                "1",
+            ],
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
@@ -100,7 +148,15 @@ class TestGenreCompareModels:
         self, genre_csv: Path, embeddings_dir: Path, tmp_path: Path, bhsa_api_over
     ) -> None:
         output = tmp_path / "summary.csv"
-        argv = [str(genre_csv), str(embeddings_dir), "--output", str(output), "--workers", "1"]
+        argv = [
+            str(genre_csv),
+            *LOGOS,
+            str(embeddings_dir),
+            "--output",
+            str(output),
+            "--workers",
+            "1",
+        ]
         api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
 
         genre_compare_models.main(argv, api_factory=api)
@@ -117,7 +173,15 @@ class TestGenreCompareCalibrated:
         output = tmp_path / "calibrated.csv"
 
         compare_calibrated.main(
-            [str(genre_csv), str(embeddings_dir), "--output", str(output), "--workers", "1"],
+            [
+                str(genre_csv),
+                *LOGOS,
+                str(embeddings_dir),
+                "--output",
+                str(output),
+                "--workers",
+                "1",
+            ],
             api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
         )
 
@@ -184,6 +248,7 @@ class TestGenreComputeBootstrapCis:
         genre_compute_bootstrap_cis.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(embeddings_dir),
                 "--output",
                 str(output),
@@ -209,6 +274,7 @@ class TestGenreCompareByGenre:
         genre_compare_by_genre.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(embeddings_dir),
                 "--output",
                 str(output),
@@ -237,6 +303,7 @@ class TestGenreExportDetail:
         genre_export_detail.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(embeddings_dir),
                 "--output-dir",
                 str(output_dir),
@@ -342,12 +409,21 @@ class TestGenreBuildMasterReport:
         api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
         summary, bootstrap = tmp_path / "summary.csv", tmp_path / "bootstrap.csv"
         compare_calibrated.main(
-            [str(genre_csv), str(embeddings_dir), "--output", str(summary), "--workers", "1"],
+            [
+                str(genre_csv),
+                *LOGOS,
+                str(embeddings_dir),
+                "--output",
+                str(summary),
+                "--workers",
+                "1",
+            ],
             api_factory=api,
         )
         genre_compute_bootstrap_cis.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(embeddings_dir),
                 "--output",
                 str(bootstrap),
@@ -364,6 +440,7 @@ class TestGenreBuildMasterReport:
         genre_export_detail.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(embeddings_dir),
                 "--output-dir",
                 str(detail_dir),
@@ -418,6 +495,7 @@ class TestGenreShuffleOrderControl:
         genre_shuffle_order_control.main(
             [
                 str(genre_csv),
+                *LOGOS,
                 str(real),
                 "--family",
                 "lexical/homograph/icf_position_mean_psalm",
@@ -634,3 +712,76 @@ class TestTrajectoryExportUiRows:
 
         assert json.loads(output.read_text())
         assert json.loads(breakdown_output.read_text())
+
+
+class TestGunkelTaxonomy:
+    def test_every_genre_script_scores_the_passages_of_a_gunkel_register(
+        self, gunkel_csv: Path, embeddings_dir: Path, tmp_path: Path, bhsa_api_over
+    ) -> None:
+        api = lambda _checkout: bhsa_api_over(HALF_VERSES)  # noqa: E731
+        summary = tmp_path / "summary.csv"
+        genre_compare_models.main(
+            [
+                str(gunkel_csv),
+                *GUNKEL,
+                str(embeddings_dir),
+                "--output",
+                str(summary),
+                "--workers",
+                "1",
+            ],
+            api_factory=api,
+        )
+        by_genre = tmp_path / "by_genre.csv"
+        genre_compare_by_genre.main(
+            [
+                str(gunkel_csv),
+                *GUNKEL,
+                str(embeddings_dir),
+                "--output",
+                str(by_genre),
+                "--workers",
+                "1",
+                "--n-permutations",
+                "20",
+                "--n-resamples",
+                "20",
+            ],
+            api_factory=api,
+        )
+        detail = tmp_path / "detail"
+        genre_export_detail.main(
+            [
+                str(gunkel_csv),
+                *GUNKEL,
+                str(embeddings_dir),
+                "--output-dir",
+                str(detail),
+                "--workers",
+                "1",
+            ],
+            api_factory=api,
+        )
+
+        assert set(pd.read_csv(summary)["model"]) == {"model_a_consonantal", "model_b_consonantal"}
+        assert set(pd.read_csv(by_genre)["genre"]) == {"Hymnus", "Fluch", "Klagelied des Einzelnen"}
+        pairs = pd.read_parquet(detail / "genre_pair_detail.parquet")
+        assert {"passage_a", "passage_b", "psalm_a", "psalm_b"} <= set(pairs.columns)
+        #: The motif inside psalm 1's song never meets its host, and the psalm 3 components meet.
+        keys = set(zip(pairs.passage_a, pairs.passage_b, strict=True))
+        assert ("1:1.1-4.3:Hymnus", "1:2.1-2.3:Fluch") not in keys
+        assert ("3:1.1-2.3:Klagelied des Einzelnen", "3:3.1-4.3:Hymnus") in keys
+
+    def test_the_length_baseline_scores_the_same_pairs_without_a_model(
+        self, gunkel_csv: Path, tmp_path: Path, bhsa_api_over
+    ) -> None:
+        output = tmp_path / "baseline.csv"
+
+        genre_compare_baseline.main(
+            [str(gunkel_csv), *GUNKEL, "--output", str(output)],
+            api_factory=lambda _checkout: bhsa_api_over(HALF_VERSES),
+        )
+
+        rows = pd.read_csv(output)
+        assert list(rows["predictor"]) == ["shorter_side", "length_agreement"]
+        assert len(set(rows["n_same_genre"] + rows["n_different_genre"])) == 1

@@ -4,13 +4,14 @@ from conftest import semantic_file
 
 from genre.pairs import GenrePair
 from genre.scripts.compare_models import compare_genre_models, score_model
+from library.centroid import uniform_weights
 
 # One half-verse node per psalm, so each psalm centroid is exactly that node's vector.
-_HALF_VERSES_BY_PSALM = {1: [1], 2: [2], 3: [3]}
+_HALF_VERSES_BY_PSALM = uniform_weights({"1": [1], "2": [2], "3": [3]})
 _PAIRS = [
-    GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-    GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-    GenrePair(2, 3, "Lament", "Praise", same_genre=False),
+    GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+    GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+    GenrePair("2", "3", 2, 3, "Lament", "Praise", same_genre=False),
 ]
 _BETTER = {1: [1.0, 0.0], 2: [0.9, 0.1], 3: [0.0, 1.0]}
 _WORSE = {1: [1.0, 0.0], 2: [0.0, 1.0], 3: [1.0, 0.0]}
@@ -44,14 +45,14 @@ def test_score_model_pools_a_psalms_half_verse_vectors_into_one_centroid(
         semantic_file(tmp_path, "m", "v.parquet"),
         {1: [1.0, 1.0], 2: [1.0, -1.0], 3: [1.0, 0.0], 4: [0.0, 1.0], 5: [0.0, 1.0]},
     )
-    half_verses_by_psalm = {1: [1, 2], 2: [3], 3: [4], 4: [5]}
+    half_verses_by_psalm = uniform_weights({"1": [1, 2], "2": [3], "3": [4], "4": [5]})
     pairs = [
-        GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-        GenrePair(3, 4, "Praise", "Praise", same_genre=True),
-        GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(1, 4, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+        GenrePair("3", "4", 3, 4, "Praise", "Praise", same_genre=True),
+        GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "4", 1, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "3", 2, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "4", 2, 4, "Lament", "Praise", same_genre=False),
     ]
 
     row = score_model(path, half_verses_by_psalm, pairs)

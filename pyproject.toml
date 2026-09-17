@@ -1,6 +1,6 @@
 [project]
 name = "tehillim-benchmark"
-version = "0.7.4"
+version = "0.7.5"
 description = "Evaluates embedding models against Psalms parallelism and genre benchmarks."
 requires-python = ">=3.12"
 license = { text = "MIT" }
@@ -99,6 +99,7 @@ ignore = [
 "tools/*" = ["T201"]
 # Text-Fabric exposes runtime-named features, so Any is the accurate annotation, not a weak one.
 "src/library/bhsa.py" = ["ANN401"]
+"src/genre/passages.py" = ["ANN401"]  # the Text-Fabric api it reads
 "src/parallelism/tf_features.py" = ["ANN401"]
 
 [tool.ruff.lint.mccabe]

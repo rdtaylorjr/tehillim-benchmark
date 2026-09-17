@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import pytest
 from conftest import semantic_file
 from core.parallel import default_max_workers
 
@@ -134,6 +135,21 @@ def test_the_genre_csv_positional_is_defined_once_for_every_genre_script() -> No
     args = parser.parse_args(["labels.csv"])
 
     assert args.genre_csv == Path("labels.csv")
+
+
+def test_the_taxonomy_arguments_are_defined_once_for_every_genre_script() -> None:
+    from library.cli import add_taxonomy_arguments
+
+    parser = argparse.ArgumentParser()
+    add_taxonomy_arguments(parser)
+    add_scoring_arguments(parser)
+
+    args = parser.parse_args(["gunkel.csv", "--taxonomy", "gunkel", "--unit", "song"])
+
+    assert (args.labels_csv, args.taxonomy, args.unit) == (Path("gunkel.csv"), "gunkel", "song")
+    assert parser.parse_args(["labels.csv", "--taxonomy", "logos"]).unit is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(["labels.csv", "--taxonomy", "bellinger"])
 
 
 def test_the_embeddings_directory_positional_is_defined_once() -> None:

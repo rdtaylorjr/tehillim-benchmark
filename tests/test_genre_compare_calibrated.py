@@ -3,30 +3,31 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import semantic_file
+from conftest import semantic_file, whole_psalm_passages
 
 from genre.calibrated import compare_genre_calibrated
 from genre.pairs import GenrePair, build_genre_pairs
 from genre.scripts.compare_calibrated import score_model
 from library.calibration import BackgroundStats
+from library.centroid import uniform_weights
 from library.errors import BenchmarkDataError
 from library.scoring import skipping_unscorable
 
 
 def test_reports_higher_effect_size_for_same_genre_when_psalms_are_closer() -> None:
     pairs = [
-        GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-        GenrePair(3, 4, "Praise", "Praise", same_genre=True),
-        GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(1, 4, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+        GenrePair("3", "4", 3, 4, "Praise", "Praise", same_genre=True),
+        GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "4", 1, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "3", 2, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "4", 2, 4, "Lament", "Praise", same_genre=False),
     ]
     psalm_vectors = {
-        1: np.array([1.0, 0.0]),
-        2: np.array([0.99, 0.14107]),
-        3: np.array([0.0, 1.0]),
-        4: np.array([0.14107, 0.99]),
+        "1": np.array([1.0, 0.0]),
+        "2": np.array([0.99, 0.14107]),
+        "3": np.array([0.0, 1.0]),
+        "4": np.array([0.14107, 0.99]),
     }
     background = BackgroundStats(mean=0.5, std=0.2, n_vectors=4)
 
@@ -43,14 +44,14 @@ def test_reports_higher_effect_size_for_same_genre_when_psalms_are_closer() -> N
 
 def test_skips_a_pair_whose_psalm_has_no_vector() -> None:
     pairs = [
-        GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-        GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(1, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+        GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "4", 1, 4, "Lament", "Praise", same_genre=False),
     ]
     psalm_vectors = {
-        1: np.array([1.0, 0.0]),
-        2: np.array([0.9, 0.1]),
-        3: np.array([0.0, 1.0]),
+        "1": np.array([1.0, 0.0]),
+        "2": np.array([0.9, 0.1]),
+        "3": np.array([0.0, 1.0]),
         # psalm 4 has no vector: the pair touching it must be excluded.
     }
     background = BackgroundStats(mean=0.5, std=0.2, n_vectors=3)
@@ -64,12 +65,12 @@ def test_skips_a_pair_whose_psalm_has_no_vector() -> None:
 def test_average_precision_at_chance_level_equals_prevalence() -> None:
     """With zero discrimination, AP equals the same-genre prevalence, not 0.5 (MTEB convention)."""
     pairs = [
-        GenrePair(1, 2, "Lament", "Lament", same_genre=True),
-        GenrePair(1, 3, "Lament", "Praise", same_genre=False),
-        GenrePair(1, 4, "Lament", "Praise", same_genre=False),
-        GenrePair(2, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "2", 1, 2, "Lament", "Lament", same_genre=True),
+        GenrePair("1", "3", 1, 3, "Lament", "Praise", same_genre=False),
+        GenrePair("1", "4", 1, 4, "Lament", "Praise", same_genre=False),
+        GenrePair("2", "3", 2, 3, "Lament", "Praise", same_genre=False),
     ]
-    psalm_vectors = {n: np.array([1.0, 0.0]) for n in range(1, 5)}
+    psalm_vectors = {str(n): np.array([1.0, 0.0]) for n in range(1, 5)}
     background = BackgroundStats(mean=0.5, std=0.2, n_vectors=4)
 
     result = compare_genre_calibrated(pairs, psalm_vectors, background)
@@ -85,9 +86,9 @@ def test_score_model_names_the_row_after_the_files_dataset_identifier(
         semantic_file(tmp_path, "mine", "v.parquet"),
         {1: [1.0, 0.0], 2: [0.9, 0.1], 3: [0.0, 1.0], 4: [0.1, 0.9]},
     )
-    pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
+    pairs = build_genre_pairs(whole_psalm_passages({1: "A", 2: "A", 3: "B", 4: "B"}))
 
-    row = score_model(path, {1: [1], 2: [2], 3: [3], 4: [4]}, pairs)
+    row = score_model(path, uniform_weights({"1": [1], "2": [2], "3": [3], "4": [4]}), pairs)
 
     assert row is not None
     assert row["model"] == "mine_consonantal"
@@ -102,9 +103,13 @@ def test_score_model_raises_when_the_background_has_no_variance(
         semantic_file(tmp_path, "flat", "v.parquet"),
         {1: [1.0, 0.0], 2: [1.0, 0.0], 3: [1.0, 0.0], 4: [1.0, 0.0]},
     )
-    pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
+    pairs = build_genre_pairs(whole_psalm_passages({1: "A", 2: "A", 3: "B", 4: "B"}))
 
-    score = partial(score_model, half_verses_by_psalm={1: [1], 2: [2], 3: [3], 4: [4]}, pairs=pairs)
+    score = partial(
+        score_model,
+        half_verses_by_psalm=uniform_weights({"1": [1], "2": [2], "3": [3], "4": [4]}),
+        pairs=pairs,
+    )
 
     with pytest.raises(BenchmarkDataError):
         score(path)
