@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import semantic_file
 
 from genre.calibrated import compare_genre_calibrated
 from genre.pairs import GenrePair, build_genre_pairs
@@ -81,7 +82,7 @@ def test_score_model_names_the_row_after_the_files_dataset_identifier(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        semantic_file(tmp_path, "mine", "v.parquet"),
         {1: [1.0, 0.0], 2: [0.9, 0.1], 3: [0.0, 1.0], 4: [0.1, 0.9]},
     )
     pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})
@@ -89,7 +90,7 @@ def test_score_model_names_the_row_after_the_files_dataset_identifier(
     row = score_model(path, {1: [1], 2: [2], 3: [3], 4: [4]}, pairs)
 
     assert row is not None
-    assert row["model"] == "mine"
+    assert row["model"] == "mine_consonantal"
     assert row["gap"] == row["same_genre_effect_size"] - row["different_genre_effect_size"]
 
 
@@ -98,7 +99,7 @@ def test_score_model_raises_when_the_background_has_no_variance(
 ) -> None:
     """Identical psalm vectors give a zero-variance background, which cannot be calibrated."""
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=flat" / "v.parquet",
+        semantic_file(tmp_path, "flat", "v.parquet"),
         {1: [1.0, 0.0], 2: [1.0, 0.0], 3: [1.0, 0.0], 4: [1.0, 0.0]},
     )
     pairs = build_genre_pairs({1: "A", 2: "A", 3: "B", 4: "B"})

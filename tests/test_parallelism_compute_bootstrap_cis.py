@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import semantic_file
+
 from parallelism.node_pairs import as_node_pairs
 from parallelism.scripts.compute_bootstrap_cis import score_model
 
@@ -51,9 +53,7 @@ _VECTORS_SPREAD = {
 
 
 def test_score_model_returns_one_row_per_scope(tmp_path: Path, write_embeddings_parquet) -> None:
-    path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
-    )
+    path = write_embeddings_parquet(semantic_file(tmp_path, "mine", "v.parquet"), _VECTORS_SPREAD)
     true_pairs = as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])
     scopes = {"overall": true_pairs, "Synonymous": true_pairs}
 
@@ -68,16 +68,14 @@ def test_score_model_returns_one_row_per_scope(tmp_path: Path, write_embeddings_
     )
 
     assert [row["scope"] for row in rows] == ["overall", "Synonymous"]
-    assert {row["model"] for row in rows} == {"mine"}
+    assert {row["model"] for row in rows} == {"mine_consonantal"}
 
 
 def test_score_model_scopes_share_one_seeded_generator_so_reruns_repeat(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     """Every scope of a model draws from one seeded stream, so a rerun reproduces it exactly."""
-    path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
-    )
+    path = write_embeddings_parquet(semantic_file(tmp_path, "mine", "v.parquet"), _VECTORS_SPREAD)
     scopes = {"overall": as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])}
     args = (
         path,
@@ -97,9 +95,7 @@ def test_score_model_passes_over_a_scope_the_corpus_has_no_pairs_for(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     """A parallelism type nobody annotated is an absent scope, not a model that failed to score."""
-    path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet", _VECTORS_SPREAD
-    )
+    path = write_embeddings_parquet(semantic_file(tmp_path, "mine", "v.parquet"), _VECTORS_SPREAD)
     true_pairs = as_node_pairs([(1, 2), (3, 4), (13, 14), (15, 16)])
     scopes = {"overall": true_pairs, "Antithetic": as_node_pairs([])}
 

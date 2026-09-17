@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import semantic_file
+
 from parallelism.pairs import RetrievalPair
 from parallelism.scripts.compare_models import compare_models, score_model
 
@@ -39,19 +41,19 @@ _CROSSED = {
 def test_score_model_names_the_row_after_the_files_dataset_identifier(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
-    path = write_embeddings_parquet(tmp_path / "domain=x" / "model=good" / "v.parquet", _ALIGNED)
+    path = write_embeddings_parquet(semantic_file(tmp_path, "good", "v.parquet"), _ALIGNED)
 
     pairs = [_pair("p1", (1,), (2,)), _pair("p2", (3,), (4,))]
 
     row = score_model(path, pairs, n_permutations=50, seed=0)
 
-    assert row["model"] == "good"
+    assert row["model"] == "good_consonantal"
 
 
 def test_score_model_scores_aligned_pairs_at_separation_auc_one(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
-    path = write_embeddings_parquet(tmp_path / "domain=x" / "model=good" / "v.parquet", _ALIGNED)
+    path = write_embeddings_parquet(semantic_file(tmp_path, "good", "v.parquet"), _ALIGNED)
     pairs = [_pair("p1", (1,), (2,)), _pair("p2", (3,), (4,))]
 
     row = score_model(path, pairs, n_permutations=50, seed=0)
@@ -63,12 +65,12 @@ def test_compare_models_ranks_by_separation_auc_descending(
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     pairs = [_pair("p1", (1,), (2,)), _pair("p2", (3,), (4,))]
-    bad = write_embeddings_parquet(tmp_path / "domain=x" / "model=bad" / "v.parquet", _CROSSED)
-    good = write_embeddings_parquet(tmp_path / "domain=x" / "model=good" / "v.parquet", _ALIGNED)
+    bad = write_embeddings_parquet(semantic_file(tmp_path, "bad", "v.parquet"), _CROSSED)
+    good = write_embeddings_parquet(semantic_file(tmp_path, "good", "v.parquet"), _ALIGNED)
 
     rows = compare_models(pairs, [bad, good], n_permutations=50, seed=0, max_workers=1)
 
-    assert [r["model"] for r in rows] == ["good", "bad"]
+    assert [r["model"] for r in rows] == ["good_consonantal", "bad_consonantal"]
     assert rows[0]["separation_auc"] == 1.0
     assert rows[1]["separation_auc"] == 0.0
 
@@ -78,8 +80,8 @@ def test_compare_models_is_unchanged_by_running_across_worker_processes(
 ) -> None:
     """Reruns are byte-compared, so worker count must never move a single reported number."""
     pairs = [_pair("p1", (1,), (2,)), _pair("p2", (3,), (4,))]
-    bad = write_embeddings_parquet(tmp_path / "domain=x" / "model=bad" / "v.parquet", _CROSSED)
-    good = write_embeddings_parquet(tmp_path / "domain=x" / "model=good" / "v.parquet", _ALIGNED)
+    bad = write_embeddings_parquet(semantic_file(tmp_path, "bad", "v.parquet"), _CROSSED)
+    good = write_embeddings_parquet(semantic_file(tmp_path, "good", "v.parquet"), _ALIGNED)
 
     sequential = compare_models(pairs, [bad, good], n_permutations=50, seed=0, max_workers=1)
     parallel = compare_models(pairs, [bad, good], n_permutations=50, seed=0, max_workers=2)
@@ -89,7 +91,7 @@ def test_compare_models_is_unchanged_by_running_across_worker_processes(
 
 def test_compare_models_flattens_per_type_metrics(tmp_path: Path, write_embeddings_parquet) -> None:
     pairs = [_pair("p1", (1,), (2,)), _pair("p2", (3,), (4,), ptype="Antithetic")]
-    path = write_embeddings_parquet(tmp_path / "domain=x" / "model=m" / "v.parquet", _ALIGNED)
+    path = write_embeddings_parquet(semantic_file(tmp_path, "m", "v.parquet"), _ALIGNED)
 
     rows = compare_models(pairs, [path], n_permutations=50, seed=0, max_workers=1)
 

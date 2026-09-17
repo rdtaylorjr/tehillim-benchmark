@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 from core.datasets import discover_domains
 
-from library.stages import BENCHMARK_ROOT, Roots, plan_cells, shuffle_families_for, stage_dir
+from library.stages import (
+    BENCHMARK_ROOT,
+    SCOPE,
+    Roots,
+    plan_cells,
+    shuffle_families_for,
+    stage_dir,
+)
 
 
 @pytest.fixture
@@ -11,10 +18,10 @@ def roots(tmp_path: Path) -> Roots:
     """Every root the stages resolve against, with two discoverable domains in the tree."""
     embeddings = tmp_path / "emb"
     for domain, unit in (
-        ("lexical", "unit=lexeme/construction=icf"),
+        ("lexical", "type=lexeme/construction=icf"),
         ("syntactic", "level=phrase/feature=typ/construction=1gram"),
     ):
-        part = embeddings / f"domain={domain}" / unit / "part-0.parquet"
+        part = embeddings / SCOPE.directory / f"domain={domain}" / unit / "part-0.parquet"
         part.parent.mkdir(parents=True)
         part.write_bytes(b"x")
     genre = tmp_path / "genre.csv"
@@ -31,12 +38,14 @@ def roots(tmp_path: Path) -> Roots:
 
 class TestDiscoverDomains:
     def test_lists_domain_partitions_present_in_the_embeddings_tree(self, roots: Roots) -> None:
-        assert discover_domains(roots.embeddings_root) == ("lexical", "syntactic")
+        assert discover_domains(roots.embeddings_root, SCOPE) == ("lexical", "syntactic")
 
     def test_ignores_files_and_non_domain_directories(self, roots: Roots) -> None:
-        (roots.embeddings_root / "_manifest.json").write_text("{}")
-        (roots.embeddings_root / "notes").mkdir()
-        assert discover_domains(roots.embeddings_root) == ("lexical", "syntactic")
+        (roots.embeddings_root / SCOPE.directory / "_manifest.json").write_text("{}")
+        (roots.embeddings_root / SCOPE.directory / "notes").mkdir()
+        scroll = roots.embeddings_root / "corpus=dss/witness=11Q5/reconstruction=none/unit=verse"
+        (scroll / "domain=semantic").mkdir(parents=True)
+        assert discover_domains(roots.embeddings_root, SCOPE) == ("lexical", "syntactic")
 
 
 class TestStageDir:
@@ -119,11 +128,9 @@ class TestPlanCells:
         """A changed dataset anywhere in the domain makes the domain's scoring stale."""
         cells = {cell.name: cell for cell in plan_cells(roots)}
         retrieval = cells["parallelism.lexical.retrieval"]
-        assert (
-            roots.embeddings_root / "domain=lexical/unit=lexeme/construction=icf/part-0.parquet"
-            in retrieval.inputs
-        )
-        assert retrieval.command_args[0] == str(roots.embeddings_root / "domain=lexical")
+        lexical = roots.embeddings_root / SCOPE.directory / "domain=lexical"
+        assert lexical / "type=lexeme/construction=icf/part-0.parquet" in retrieval.inputs
+        assert retrieval.command_args[0] == str(lexical)
 
     def test_shuffle_cells_exist_per_registered_family_of_the_domain(self, roots: Roots) -> None:
         cells = plan_cells(roots)

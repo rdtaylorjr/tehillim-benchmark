@@ -24,7 +24,9 @@ def _modules_with_main() -> set[str]:
 def _planned_modules(tmp_path: Path) -> set[str]:
     """Modules the stage declarations invoke for a tree holding one domain."""
     embeddings = tmp_path / "emb"
-    (embeddings / "domain=lexical/unit=lexeme/construction=icf").mkdir(parents=True)
+    (embeddings / "corpus=bhsa/unit=half_verse/domain=lexical/type=lexeme/construction=icf").mkdir(
+        parents=True
+    )
     roots = Roots(
         data_root=tmp_path / "d",
         embeddings_root=embeddings,

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.sparse as sp
+from conftest import semantic_file
 
 from genre.across_genres import (
     GenreRunConfig,
@@ -308,7 +309,7 @@ class TestScoreModel:
     ) -> None:
         _psalm_ids, psalm_vectors, genre_by_psalm, genres, pairs = _fixture()
         path = write_embeddings_parquet(
-            tmp_path / "domain=d" / "model=mine" / "v.parquet",
+            semantic_file(tmp_path, "mine", "v.parquet"),
             {psalm: vector.tolist() for psalm, vector in psalm_vectors.items()},
         )
 
@@ -318,7 +319,7 @@ class TestScoreModel:
             _config(genre_by_psalm, genres, pairs),
         )
 
-        assert {row["model"] for row in rows} == {"mine"}
+        assert {row["model"] for row in rows} == {"mine_consonantal"}
         assert {row["genre"] for row in rows} == set(genres)
 
     def test_raises_for_a_model_whose_psalm_vectors_cannot_be_scored(
@@ -326,7 +327,7 @@ class TestScoreModel:
     ) -> None:
         """One usable psalm leaves no pair, which the shared policy turns into a skip."""
         path = write_embeddings_parquet(
-            tmp_path / "domain=d" / "model=tiny" / "v.parquet", {1: [1.0, 0.0]}
+            semantic_file(tmp_path, "tiny", "v.parquet"), {1: [1.0, 0.0]}
         )
         score = partial(
             score_model,

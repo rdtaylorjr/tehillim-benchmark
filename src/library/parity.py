@@ -8,7 +8,7 @@ import pandas as pd
 from core.datasets import dataset_identifier, discover_domains
 from core.skips import skipped_in_log
 
-from library.stages import BENCHMARK_ROOT, Roots, domain_datasets
+from library.stages import BENCHMARK_ROOT, SCOPE, Roots, domain_datasets
 
 #: Each benchmark's coverage table, and the raw stage whose log explains any skipped dataset.
 MASTER_TABLES: dict[str, tuple[str, str]] = {
@@ -35,7 +35,7 @@ def check_parity(roots: Roots, log_root: Path) -> dict[str, dict[str, object]]:
     """Compares every benchmark table with its domain's datasets, raising on an unexplained gap."""
     report: dict[str, dict[str, object]] = {}
     failures: list[str] = []
-    for domain in discover_domains(roots.embeddings_root):
+    for domain in discover_domains(roots.embeddings_root, SCOPE):
         datasets = {dataset_identifier(p) for p in domain_datasets(roots, domain)}
         for benchmark, (_, raw_stage) in MASTER_TABLES.items():
             scored = master_models(roots, benchmark, domain)

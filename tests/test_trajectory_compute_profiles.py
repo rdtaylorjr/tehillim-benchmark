@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import semantic_file
 
 from library.errors import InsufficientDataError
 from trajectory.scripts.compute_profiles import (
@@ -89,7 +90,7 @@ def test_score_model_profiles_in_memory_and_returns_its_distance_rows(
 ) -> None:
     """Nothing is written per model: the profile lives only long enough to yield distances."""
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        semantic_file(tmp_path, "mine", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [0.9, 0.1],
@@ -105,7 +106,7 @@ def test_score_model_profiles_in_memory_and_returns_its_distance_rows(
 
     assert list(tmp_path.rglob("*.parquet")) == [path]
     assert n_profiles == 2
-    assert [row["model"] for row in rows] == ["mine"]
+    assert [row["model"] for row in rows] == ["mine_consonantal"]
     assert {row["psalm_a"] for row in rows} == {1}
     assert {row["psalm_b"] for row in rows} == {2}
 
@@ -115,7 +116,7 @@ def test_score_model_raises_when_no_psalm_has_a_complete_sequence(
 ) -> None:
     """A zero-vector half-verse drops from the file, so its psalm has no sequence to profile."""
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        semantic_file(tmp_path, "mine", "v.parquet"),
         {1: [1.0, 0.0], 2: [0.0, 0.0], 3: [0.7, 0.3], 4: [0.5, 0.5]},
     )
     with pytest.raises(InsufficientDataError, match="mine"):

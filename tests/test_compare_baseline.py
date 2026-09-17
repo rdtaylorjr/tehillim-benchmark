@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import semantic_file
 
 from library.calibration import BackgroundStats, background_similarity_stats
 from parallelism.node_pairs import as_node_pairs, pair_similarities
@@ -76,13 +77,13 @@ def test_score_model_loads_a_file_and_names_the_row_after_its_dataset_identifier
     tmp_path: Path, write_embeddings_parquet
 ) -> None:
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=mine" / "v.parquet",
+        semantic_file(tmp_path, "mine", "v.parquet"),
         {1: [1.0, 0.0], 2: [1.0, 0.0], 5: [1.0, 0.0], 6: [0.0, 1.0], 7: [0.7, 0.7]},
     )
 
     row = score_model(path, as_node_pairs([(1, 2)]), as_node_pairs([(5, 6)]), [5, 6, 7])
 
-    assert row["model"] == "mine"
+    assert row["model"] == "mine_consonantal"
     assert row["n_true"] == 1
     assert row["n_baseline"] == 1
 
@@ -92,7 +93,7 @@ def test_score_model_reports_the_gap_between_true_and_baseline_effect_sizes(
 ) -> None:
     """True pairs are identical vectors and baseline pairs orthogonal, so the gap is positive."""
     path = write_embeddings_parquet(
-        tmp_path / "domain=d" / "model=m" / "v.parquet",
+        semantic_file(tmp_path, "m", "v.parquet"),
         {
             1: [1.0, 0.0],
             2: [1.0, 0.0],

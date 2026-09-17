@@ -13,7 +13,10 @@ def _roots(tmp_path: Path) -> Roots:
     embeddings = tmp_path / "emb"
     for name in ("a", "b", "c"):
         part = (
-            embeddings / "domain=lexical" / f"unit={name}" / "construction=icf" / "part-0.parquet"
+            embeddings
+            / "corpus=bhsa/unit=half_verse/domain=lexical"
+            / f"type={name}"
+            / "construction=icf/part-0.parquet"
         )
         part.parent.mkdir(parents=True)
         part.write_bytes(b"x")

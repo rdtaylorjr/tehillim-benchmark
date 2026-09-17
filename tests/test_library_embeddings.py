@@ -4,6 +4,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from conftest import _write_embeddings_parquet as _write_parquet
+from conftest import semantic_file
 from core.datasets import is_sparse_embeddings
 from core.export import write_sparse_vectors
 
@@ -179,7 +180,7 @@ def test_sparse_vectors_to_csr_matches_writing_a_draw_and_reading_it_back(tmp_pa
         )
         for node in range(110, 100, -1)
     }
-    path = tmp_path / "draw.parquet"
+    path = semantic_file(tmp_path, "draw")
     write_sparse_vectors(path, sparse_vectors, dim, "one shuffle draw")
 
     written_ids, written_matrix = load_sparse_embeddings(path)
@@ -257,7 +258,7 @@ def test_readers_release_arrow_memory_after_converting(tmp_path, write_embedding
     import pyarrow as pa
     from core.datasets import read_dense_rows
 
-    path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", {1: [1.0, 0.0]})
+    path = write_embeddings_parquet(semantic_file(tmp_path, "m", "v.parquet"), {1: [1.0, 0.0]})
     before = pa.total_allocated_bytes()
     read_dense_rows(path)
     assert pa.total_allocated_bytes() <= before
@@ -270,7 +271,7 @@ def test_read_dense_rows_reads_in_batches_into_one_preallocated_matrix(
     from core.datasets import read_dense_rows
 
     vectors = {n: [float(n), float(n) / 2, 0.0] for n in range(1, 11)}
-    path = write_embeddings_parquet(tmp_path / "domain=d/model=m/v.parquet", vectors)
+    path = write_embeddings_parquet(semantic_file(tmp_path, "m", "v.parquet"), vectors)
     rows = read_dense_rows(path, batch_size=3)
     assert list(rows) == list(vectors)
     for node, expected in vectors.items():
