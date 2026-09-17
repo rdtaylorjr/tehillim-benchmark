@@ -14,6 +14,7 @@ from ui_export.scripts.build_detail_json import (
     build_one_model,
     choose_primary_metric,
     genre_sources,
+    pair_items,
     residualize_trajectory_metric,
     split_sections,
     table_model_sets,
@@ -653,3 +654,18 @@ def test_a_task_names_itself_by_its_model_for_the_skip_report() -> None:
     )
 
     assert _task_model(task) == "alephbert_consonantal"
+
+
+def test_pair_items_reads_passage_columns_where_written_and_psalms_for_a_whole_psalm_table() -> (
+    None
+):
+    """Logos detail tables predate passages and name each side by psalm, which is the passage id."""
+    passages = pd.DataFrame(
+        {"passage_a": ["9:1.1-5.7:Hymnus"], "passage_b": ["23"], "value": [0.1]}
+    )
+    psalms = pd.DataFrame({"psalm_a": [9], "psalm_b": [23], "value": [0.1]})
+
+    assert list(pair_items(passages).item_a) == ["9:1.1-5.7:Hymnus"]
+    assert list(pair_items(psalms).item_a) == ["9"]
+    assert list(pair_items(psalms).item_b) == ["23"]
+    assert "psalm_a" in pair_items(psalms).columns

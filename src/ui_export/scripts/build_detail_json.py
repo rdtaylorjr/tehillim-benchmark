@@ -246,12 +246,21 @@ def _grouped_by_model(
     return dict(tuple(frame.groupby("model")))
 
 
+def pair_items(frame: pd.DataFrame) -> pd.DataFrame:
+    """The passage ids a pair table names its sides by, as item_a/item_b."""
+    if "passage_a" in frame.columns:
+        return frame.rename(columns={"passage_a": "item_a", "passage_b": "item_b"})
+    #: A whole-psalm register's tables name each side by psalm, which is that passage's id.
+    return frame.assign(item_a=frame.psalm_a.astype(str), item_b=frame.psalm_b.astype(str))
+
+
 def _genre_pairs_by_model(path: Path, source: GenreSource) -> dict[str, "pd.DataFrame"]:
     """One frame per model with the passages as items, the labels joined from the source."""
     if not path.exists():
         return {}
-    frame = pd.read_parquet(path).rename(columns={"passage_a": "item_a", "passage_b": "item_b"})
-    frame = attach_genre_columns(frame, source.genre_by_item, key="item")
+    frame = attach_genre_columns(
+        pair_items(pd.read_parquet(path)), source.genre_by_item, key="item"
+    )
     return dict(tuple(frame.groupby("model")))
 
 
