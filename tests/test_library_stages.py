@@ -238,8 +238,9 @@ def test_the_declared_outputs_account_for_every_file_in_the_published_tree() -> 
     declared = {
         o for cell in plan_cells(roots) for o in cell.outputs if o.is_relative_to(data_root)
     }
+    #: A dataset written as a directory of parts is one declared output covering every part.
     on_disk = {
-        p
+        next((o for o in declared if p.is_relative_to(o)), p)
         for p in (data_root / BENCHMARK_ROOT).rglob("*")
         if p.is_file() and p.name not in (".DS_Store", "_manifest.json")
     }
