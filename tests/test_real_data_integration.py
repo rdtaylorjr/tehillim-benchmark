@@ -17,13 +17,12 @@ from library.psalm_vectors import load_psalm_vectors
 DATA_ROOT = Path(
     os.environ.get(
         "TEHILLIM_EMBEDDINGS_DATA",
-        Path.home() / "Developer" / "research" / "tehillim-embeddings" / "data",
+        Path(__file__).resolve().parents[2] / "tehillim-embeddings" / "data",
     )
 )
-DENSE = DATA_ROOT / "domain=morphological/feature=sp/construction=1_2_3gram/part-0.parquet"
-SPARSE = (
-    DATA_ROOT / "domain=syntactic/level=phrase/feature=typ/construction=1_2_3gram/part-0.parquet"
-)
+SCOPE = DATA_ROOT / "corpus=bhsa/unit=half_verse"
+DENSE = SCOPE / "domain=morphological/feature=sp/construction=1_2_3gram/part-0.parquet"
+SPARSE = SCOPE / "domain=syntactic/level=phrase/feature=typ/construction=1_2_3gram/part-0.parquet"
 
 pytestmark = [
     pytest.mark.integration,

@@ -2,6 +2,8 @@ import csv
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from library.rows_output import write_json, write_rows_csv, write_text
@@ -154,3 +156,70 @@ def test_a_mid_write_failure_keeps_the_previous_file(tmp_path: Path) -> None:
 
     assert path.read_text() == "original"
     assert [p.name for p in tmp_path.iterdir()] == ["out.bin"]
+
+
+def _frame(rows: int) -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    return pd.DataFrame({"model": ["m"] * rows, "value": rng.random(rows)})
+
+
+def test_write_dataframe_parquet_writes_one_file_under_the_part_cap(tmp_path: Path) -> None:
+    from library.rows_output import write_dataframe_parquet
+
+    path = tmp_path / "table.parquet"
+    frame = _frame(100)
+
+    write_dataframe_parquet(path, frame)
+
+    assert path.is_file()
+    pd.testing.assert_frame_equal(pd.read_parquet(path), frame)
+
+
+def test_write_dataframe_parquet_splits_into_parts_over_the_part_cap(tmp_path: Path) -> None:
+    """Random floats do not compress, so 10k rows of them exceed a 20 KB cap and split."""
+    from library.rows_output import write_dataframe_parquet
+
+    path = tmp_path / "table.parquet"
+    frame = _frame(10_000)
+
+    write_dataframe_parquet(path, frame, max_part_bytes=20_000)
+
+    parts = sorted(path.iterdir())
+    assert path.is_dir()
+    assert [p.name for p in parts] == [f"part-{i}.parquet" for i in range(len(parts))]
+    assert len(parts) > 1
+    assert all(p.stat().st_size <= 20_000 for p in parts)
+    pd.testing.assert_frame_equal(pd.read_parquet(path), frame)
+
+
+def test_write_dataframe_parquet_replaces_a_file_with_parts_and_back(tmp_path: Path) -> None:
+    from library.rows_output import write_dataframe_parquet
+
+    path = tmp_path / "table.parquet"
+    write_dataframe_parquet(path, _frame(100))
+    write_dataframe_parquet(path, _frame(10_000), max_part_bytes=20_000)
+    assert path.is_dir()
+    small = _frame(100)
+
+    write_dataframe_parquet(path, small)
+
+    assert path.is_file()
+    pd.testing.assert_frame_equal(pd.read_parquet(path), small)
+    assert [p.name for p in tmp_path.iterdir()] == ["table.parquet"]
+
+
+def test_write_dataframe_parquet_keeps_the_previous_parts_when_the_write_fails(
+    tmp_path: Path,
+) -> None:
+    from library.rows_output import write_dataframe_parquet
+
+    path = tmp_path / "table.parquet"
+    previous = _frame(10_000)
+    write_dataframe_parquet(path, previous, max_part_bytes=20_000)
+
+    with pytest.raises(Exception, match="Unsupported compression"):
+        write_dataframe_parquet(path, _frame(100), compression="no-such-codec")
+
+    assert path.is_dir()
+    pd.testing.assert_frame_equal(pd.read_parquet(path), previous)
+    assert [p.name for p in tmp_path.iterdir()] == ["table.parquet"]
